@@ -1,0 +1,41 @@
+Bin weight: 928 | Items: 5 11 
+Bin weight: 993 | Items: 17 70 90 
+Bin weight: 996 | Items: 24 56 87 
+Bin weight: 986 | Items: 7 96 117 
+Bin weight: 988 | Items: 4 104 111 
+Bin weight: 943 | Items: 51 58 75 
+Bin weight: 1000 | Items: 21 55 97 
+Bin weight: 993 | Items: 25 59 78 
+Bin weight: 1000 | Items: 40 47 72 
+Bin weight: 986 | Items: 30 57 64 
+Bin weight: 938 | Items: 19 92 113 
+Bin weight: 965 | Items: 38 46 118 
+Bin weight: 987 | Items: 9 94 107 
+Bin weight: 995 | Items: 12 68 106 
+Bin weight: 955 | Items: 50 60 67 
+Bin weight: 998 | Items: 0 116 119 
+Bin weight: 988 | Items: 26 63 73 
+Bin weight: 971 | Items: 1 6 
+Bin weight: 985 | Items: 33 35 109 
+Bin weight: 959 | Items: 20 82 91 
+Bin weight: 950 | Items: 31 65 76 
+Bin weight: 992 | Items: 14 79 83 
+Bin weight: 986 | Items: 22 61 86 
+Bin weight: 974 | Items: 16 81 95 
+Bin weight: 984 | Items: 29 48 102 
+Bin weight: 967 | Items: 34 53 89 
+Bin weight: 992 | Items: 18 71 84 
+Bin weight: 991 | Items: 10 85 105 
+Bin weight: 983 | Items: 28 54 101 
+Bin weight: 1000 | Items: 8 77 115 
+Bin weight: 1000 | Items: 2 110 114 
+Bin weight: 973 | Items: 23 69 88 
+Bin weight: 980 | Items: 36 45 99 
+Bin weight: 811 | Items: 13 32 
+Bin weight: 954 | Items: 27 66 100 
+Bin weight: 990 | Items: 3 108 112 
+Bin weight: 982 | Items: 39 42 93 
+Bin weight: 978 | Items: 15 80 98 
+Bin weight: 969 | Items: 41 44 103 
+Bin weight: 994 | Items: 43 52 62 
+Bin weight: 996 | Items: 37 49 74 

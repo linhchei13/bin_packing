@@ -1,0 +1,63 @@
+use io;
+
+/* Read instance data */
+function input() {
+    local usage = "Usage: hexaly bin_packing.hxm "
+            + "inFileName=inputFile [solFileName=outputFile] [hxTimeLimit=timeLimit]";
+
+    if (inFileName == nil) throw usage;
+    local inFile = io.openRead(inFileName);
+
+    nbItems = inFile.readInt();
+    binCapacity = inFile.readInt();
+    itemWeights[i in 0...nbItems] = inFile.readInt();
+
+    nbMinBins = ceil(sum[i in 0...nbItems](itemWeights[i]) / binCapacity);
+    nbMaxBins = min(nbItems, 2 * nbMinBins);
+}
+
+/* Declare the optimization model */
+function model() {
+    // Set decisions: bins[k] represents the items in bin k
+    bins[k in 0...nbMaxBins] <- set(nbItems);
+
+    // Each item must be in one bin and one bin only
+    constraint partition[k in 0...nbMaxBins](bins[k]);
+    
+    for [k in 0...nbMaxBins] {
+        // Weight constraint for each bin
+        binWeights[k] <- sum(bins[k], i => itemWeights[i]);
+        constraint binWeights[k] <= binCapacity;
+    
+        // Bin k is used if at least one item is in it
+        binsUsed[k] <- (count(bins[k]) > 0);
+    }
+    
+    // Count the used bins
+    totalBinsUsed <- sum[k in 0...nbMaxBins](binsUsed[k]);
+
+    // Minimize the number of used bins
+    minimize totalBinsUsed;
+}
+
+/* Parametrize the solver */
+function param() {
+    if (hxTimeLimit == nil) hxTimeLimit = 5;  
+
+    // Stop the search if the lower threshold is reached
+    lsObjectiveThreshold = nbMinBins;
+}
+
+/* Write the solution in a file */
+function output() {
+    if (solFileName == nil) return;
+    local solFile = io.openWrite(solFileName);
+    for [k in 0...nbMaxBins] {
+        if (bins[k].value.count() == 0) continue;
+        solFile.print("Bin weight: ", binWeights[k].value, " | Items: ");
+        for [e in bins[k].value]
+            solFile.print(e + " ");
+        solFile.println();
+    }
+}
+

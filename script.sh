@@ -1,0 +1,1 @@
+python .\bin_packing.py instances\t120_00.txt output.txt
