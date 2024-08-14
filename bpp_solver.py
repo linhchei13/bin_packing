@@ -3,7 +3,7 @@ import math
 from threading import Timer
 
 from pysat.formula import CNF
-from pysat.solvers import Glucose3
+from pysat.solvers import Glucose42
 
 import matplotlib.pyplot as plt
 import timeit
@@ -16,35 +16,39 @@ def read_file_instance(filepath):
     f = open(filepath)
     return f.read().splitlines()
 
-def powerset(iterable):
-    "powerset([1,2,3]) --> () (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"
-    s = list(iterable)
-    return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
-
-input = read_file_instance("inputs/test.txt")
-n = int(input[0])
-bin_size = input[1].split()
-W = int(bin_size[0])
-H = int(bin_size[1])
-items = [[int(val) for val in i.split()] for i in input[2:]]
-items_area = [i[0] * i[1] for i in items]
-bin_area = W * H
-lower_bound = math.ceil(sum(items_area) / bin_area)
-max_bin = min(n, 2 * lower_bound)
-upper_bound = min(n, 2 * lower_bound)
-counter = 1
-
 def positive_range(end):
     if (end < 0):
         return []
     return range(end)
 
-def OPP(rectangles, width, height):
+def display_solution(strip, rectangles, pos_circuits):
+    # define Matplotlib figure and axis
+    fig, ax = plt.subplots()
+    ax = plt.gca()
+    plt.title(strip)
+
+    if len(pos_circuits) > 0:
+        for i in range(len(rectangles)):
+            rect = plt.Rectangle(pos_circuits[i], *rectangles[i], edgecolor="#333")
+            ax.add_patch(rect)
+
+    ax.set_xlim(0, strip[0])
+    ax.set_ylim(0, strip[1] + 1)
+    ax.set_xticks(range(strip[0] + 1))
+    ax.set_yticks(range(strip[1] + 1))
+    ax.set_xlabel('width')
+    ax.set_ylabel('height')
+    # display plot
+    plt.show()
+
+
+def OPP(rectangles, n, W, H):
 # Define the variables
     cnf = CNF()
     variables = {}
-    opp_counter = 1
-
+    counter = 1
+    width = W
+    height = n * H
     # find max height and width rectangles for largest rectangle symmetry breaking
     max_height = max([int(rectangle[1]) for rectangle in rectangles])
     max_width = max([int(rectangle[0]) for rectangle in rectangles])
@@ -52,25 +56,26 @@ def OPP(rectangles, width, height):
     # create lr, ud variables
     for i in range(len(rectangles)):
         for j in range(len(rectangles)):
-            variables[f"lr{i + 1},{j + 1}"] = opp_counter  # lri,rj
-            opp_counter += 1
-            variables[f"ud{i + 1},{j + 1}"] = opp_counter  # uri,rj
-            opp_counter += 1
-        for e in positive_range(width - rectangles[i][0] + 2):
-            variables[f"px{i + 1},{e}"] = opp_counter  # pxi,e
-            opp_counter += 1
-        for f in positive_range(height - rectangles[i][1] + 2):
-            variables[f"py{i + 1},{f}"] = opp_counter  # pyi,f
-            opp_counter += 1
+            variables[f"lr{i + 1},{j + 1}"] = counter  # lri,rj
+            counter += 1
+            variables[f"ud{i + 1},{j + 1}"] = counter  # uri,rj
+            counter += 1
+        for e in positive_range(width - rectangles[i][0] + 1):
+            variables[f"px{i + 1},{e}"] = counter  # pxi,e
+            counter += 1
+        for f in positive_range(height - rectangles[i][1] + 1):
+            variables[f"py{i + 1},{f}"] = counter  # pyi,f
+            
+            counter += 1
 
     # Add the 2-literal axiom clauses (order constraint)
     for i in range(len(rectangles)):
        # ¬pxi,e ∨ pxi,e+1
-        for e in range(width - rectangles[i][0] + 1):  # -1 because we're using e+1 in the clause
+        for e in range(width - rectangles[i][0]):  # -1 because we're using e+1 in the clause
             cnf.append([-variables[f"px{i + 1},{e}"],
                         variables[f"px{i + 1},{e + 1}"]])
         #  ¬pyi,f ∨ pxi,f+1
-        for f in range(height - rectangles[i][1] + 1):  # -1 because we're using f+1 in the clause
+        for f in range(height - rectangles[i][1]):  # -1 because we're using f+1 in the clause
             cnf.append([-variables[f"py{i + 1},{f}"],
                         variables[f"py{i + 1},{f + 1}"]])
 
@@ -175,92 +180,75 @@ def OPP(rectangles, width, height):
     for i in range(len(rectangles)):
         cnf.append([variables[f"px{i + 1},{width - rectangles[i][0]}"]]) # px(i, W-wi)
         cnf.append([variables[f"py{i + 1},{height - rectangles[i][1]}"]])  # py(i, H-hi)
-    result = None
-    with Glucose3() as solver:
+    
+    # Add the 
+    for k in range(2, n + 1):
+        for i in range(len(rectangles)):
+            h = rectangles[i][1]
+            # y in range ((n - 1) * H, n * H) 
+            # => -py(i, (n - 1) * H) -> py(i, n * H - h)
+        
+            cnf.append([variables[f"py{i + 1},{(k - 1) * H}"],
+                        -variables[f"py{i + 1},{k * H - h}"]])
+
+    
+    
+    # Solve the SAT problem
+    with Glucose42() as solver:
         solver.append_formula(cnf)
         if solver.solve():
-            result = "Sat"
-        else:
-            result = "Unsat"
-    return result
-
-def bpp():
-    cnf = CNF()
-    variables = {}
-    global counter
-    global upper_bound
-    # x_i_j
-    for i in range(n):
-        for j in range(upper_bound):
-            variables[f"x{i + 1},{j + 1}"] = counter
-            counter += 1
-    # k_j
-    for i in range(upper_bound):
-        variables[f"k{i + 1}"] = counter
-        counter += 1
-        
-    #  Each item must be in one bin and one bin only
-    for i in range(n):
-        cnf.append([variables[f"x{i + 1},{j + 1}"] for j in range(upper_bound)])  # At least one bin
-        for j1 in range(upper_bound):
-            for j2 in range(j1 + 1, upper_bound):
-                cnf.append([-variables[f"x{i + 1},{j1 + 1}"], -variables[f"x{i + 1},{j2 + 1}"]])
-    
-    # If x_i_j is true, then k_j must be true
-    for j in range(upper_bound):
-        for i in range(n):
-            cnf.append([-variables[f"x{i + 1},{j + 1}"], variables[f"k{j + 1}"]])
-    
-    for j in range(upper_bound):
-        for subset in powerset(range(n)):
-            if subset and len(subset) != 1:
-                opp = OPP([items[i] for i in subset], W, H)
-                # If the subset is infeasible, then the subset cannot be in the same bin
-                if opp == "Unsat":
-                    cnf.append([-variables[f"x{i + 1},{j + 1}"] for i in subset])
-                print(subset, j + 1, [variables[f"x{i + 1},{j + 1}"] for i in subset])
-                
-    print("Variables:", variables)
-    print(cnf.clauses)
-    timeout = 60  # timeout in seconds
-    def interrupt(solver):
-        solver.interrupt()
-
-
-    with Glucose3(bootstrap_with=cnf.clauses, use_timer=True) as s:
-        timer = Timer(timeout, interrupt, [s])
-        timer.start()
-        try:
-            for _ in range(upper_bound):
-                result = s.solve(assumptions=[-variables[f"k{j + 1}"] for j in range(upper_bound)])
-                if result:
-                    print("SAT")
-                    timer.cancel()
-                    break
+            pos = [[0 for i in range(2)] for j in range(len(rectangles))]
+            model = solver.get_model()
+            print("SAT")
+            print(model)
+            result = {}
+            for var in model:
+                if var > 0:
+                    result[list(variables.keys())[list(variables.values()).index(var)]] = True
                 else:
-                    upper_bound -= 1
-            else:
-                print("UNSAT")
-            timer.cancel()
-        except TimeoutException:
-            print("Timeout")
-        # Print solution to console
-        if result:
-            print("Number of bins:", upper_bound)
-            model = s.get_model()
-            # print(model)
-            if model is not None:
-                print(model)
-                print(variables)
-                for k in range(max_bin):
-                    if model[variables[f"k{k + 1}"] - 1] > 0:
-                        print(f"Bin {k + 1}:")
-                        for i in range(n):
-                            if model[variables[f"x{i + 1},{k + 1}"] - 1] > 0:
-                                print(f"Item {i + 1}:", items[i])
-                
-# 
-bpp()
+                    result[list(variables.keys())[list(variables.values()).index(-var)]] = False
+            print(result)
 
+            # from SAT result, decode into rectangles' position
+            for i in range(len(rectangles)):
+                for e in range(width - rectangles[i][0] + 1):
+                    if result[f"px{i + 1},{e}"] == False and result[f"px{i + 1},{e + 1}"] == True:
+                        print(f"x{i + 1} = {e + 1}")
+                        pos[i][0] = e + 1
+                    if e == 0 and result[f"px{i + 1},{e}"] == True:
+                        print(f"x{i + 1} = 0")
+                        pos[i][0] = 0
+                for f in range(height - rectangles[i][1] + 1):
+                    if result[f"py{i + 1},{f}"] == False and result[f"py{i + 1},{f + 1}"] == True:
+                        print(f"y{i + 1} = {f + 1}")
+                        pos[i][1] = f + 1
+                    if f == 0 and result[f"py{i + 1},{f}"] == True:
+                        print(f"y{i + 1} = 0")
+                        pos[i][1] = 0
+            print(pos)
+            display_solution((W, height), rectangles, pos)
+            return(["sat", pos])
 
+        else:
+            return("unsat")
     
+
+input = read_file_instance("inputs/ins-0.txt")
+n = int(input[0])
+bin_size = input[1].split()
+W = int(bin_size[0])
+H = int(bin_size[1])
+items = [[int(val) for val in i.split()] for i in input[2:]]
+items_area = [i[0] * i[1] for i in items]
+bin_area = W * H
+lower_bound = math.ceil(sum(items_area) / bin_area)
+
+def BPP():
+    for i in range(lower_bound, n + 1):
+        print(f"Trying with {i} bins")
+        result = OPP(items, i, W, H)
+        if result[0] == "sat":
+            print(f"Solution found with {i} bins")
+            break
+BPP()	
+print(items)		
