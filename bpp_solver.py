@@ -9,7 +9,9 @@ import matplotlib.pyplot as plt
 import timeit
 
 class TimeoutException(Exception): pass
-# Initialize the CNF formula
+
+def interrupt(solver):
+    solver.interrupt()
 
 #read file
 def read_file_instance(filepath):
@@ -41,14 +43,13 @@ def display_solution(strip, rectangles, pos_circuits):
     # display plot
     plt.show()
 
-
 def OPP(rectangles, n, W, H):
 # Define the variables
     cnf = CNF()
     variables = {}
     counter = 1
-    width = W
-    height = n * H
+    width = n * W
+    height = H
     # find max height and width rectangles for largest rectangle symmetry breaking
     max_height = max([int(rectangle[1]) for rectangle in rectangles])
     max_width = max([int(rectangle[0]) for rectangle in rectangles])
@@ -65,7 +66,6 @@ def OPP(rectangles, n, W, H):
             counter += 1
         for f in positive_range(height - rectangles[i][1] + 1):
             variables[f"py{i + 1},{f}"] = counter  # pyi,f
-            
             counter += 1
 
     # Add the 2-literal axiom clauses (order constraint)
@@ -181,18 +181,15 @@ def OPP(rectangles, n, W, H):
         cnf.append([variables[f"px{i + 1},{width - rectangles[i][0]}"]]) # px(i, W-wi)
         cnf.append([variables[f"py{i + 1},{height - rectangles[i][1]}"]])  # py(i, H-hi)
     
-    # Add the 
-    for k in range(2, n + 1):
+    for k in range(1, n):
         for i in range(len(rectangles)):
-            h = rectangles[i][1]
-            # y in range ((n - 1) * H, n * H) 
-            # => -py(i, (n - 1) * H) -> py(i, n * H - h)
-        
-            cnf.append([variables[f"py{i + 1},{(k - 1) * H}"],
-                        -variables[f"py{i + 1},{k * H - h}"]])
-
-    
-    
+            w = rectangles[i][0]
+            # px(i, k * W - w) <-> px(i, k * W - 1)
+            cnf.append([-variables[f"px{i + 1},{k * W - 1}"], 
+                        variables[f"px{i + 1},{k * W - w}"]])
+            cnf.append([variables[f"px{i + 1},{k * W - 1}"], 
+                        -variables[f"px{i + 1},{k * W - w}"]])
+            
     # Solve the SAT problem
     with Glucose42() as solver:
         solver.append_formula(cnf)
@@ -200,14 +197,12 @@ def OPP(rectangles, n, W, H):
             pos = [[0 for i in range(2)] for j in range(len(rectangles))]
             model = solver.get_model()
             print("SAT")
-            print(model)
             result = {}
             for var in model:
                 if var > 0:
                     result[list(variables.keys())[list(variables.values()).index(var)]] = True
                 else:
                     result[list(variables.keys())[list(variables.values()).index(-var)]] = False
-            print(result)
 
             # from SAT result, decode into rectangles' position
             for i in range(len(rectangles)):
@@ -226,29 +221,47 @@ def OPP(rectangles, n, W, H):
                         print(f"y{i + 1} = 0")
                         pos[i][1] = 0
             print(pos)
-            display_solution((W, height), rectangles, pos)
             return(["sat", pos])
 
         else:
             return("unsat")
-    
+            
+def BPP(W, H, items, n):
+    items_area = [i[0] * i[1] for i in items]
+    bin_area = W * H
+    lower_bound = math.ceil(sum(items_area) / bin_area)
+    for k in range(lower_bound, n + 1):
+        result = OPP(items, k, W, H)
+        if result[0] == "sat":
+            print("Solution found with", k, "bins")
+            pos = result[1]
+            bins = []
+            position_in_bins = []
+            for j in range(k):
+                items_in_bin = []
+                position = []
+                for i in range(n):
+                    if pos[i][0] // W == j:
+                        items_in_bin.append(i)
+                        position.append([pos[i][0] - j * W, pos[i][1]])
+                bins.append(items_in_bin)
+                position_in_bins.append(position)
+            return[bins, position_in_bins]
+        
+def print_solution(bpp_result):
+    bins = bpp_result[0]
+    pos = bpp_result[1]
+    for i in range(len(bins)):
+        print("Bin", i + 1, "contains items", [(j + 1) for j in bins[i]])
+        display_solution((W, H), [items[j] for j in bins[i]], pos[i])
 
-input = read_file_instance("inputs/ins-0.txt")
+
+input = read_file_instance("input_data/ins-4.txt")
 n = int(input[0])
 bin_size = input[1].split()
 W = int(bin_size[0])
 H = int(bin_size[1])
 items = [[int(val) for val in i.split()] for i in input[2:]]
-items_area = [i[0] * i[1] for i in items]
-bin_area = W * H
-lower_bound = math.ceil(sum(items_area) / bin_area)
 
-def BPP():
-    for i in range(lower_bound, n + 1):
-        print(f"Trying with {i} bins")
-        result = OPP(items, i, W, H)
-        if result[0] == "sat":
-            print(f"Solution found with {i} bins")
-            break
-BPP()	
-print(items)		
+bpp_result = BPP(W, H, items, n)
+print_solution(bpp_result)
