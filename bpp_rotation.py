@@ -293,20 +293,14 @@ def BPP(W, H, items, n):
         result = OPP(items, k, W, H)
         if result[0] == "sat":
             print(f"Solution found with {k} bins")
-            pos = result[1]
-            bins = []
-            position_in_bins = []
+            position = result[1]
+            bins_used = [[i for i in range(n) if position[i][0] // W == j] for j in range(k)]
             rotation = result[2]
             for j in range(k):
-                items_in_bin = []
-                position = []
                 for i in range(n):
-                    if pos[i][0] // W == j:
-                        items_in_bin.append(i)
-                        position.append([pos[i][0] - j * W, pos[i][1]])
-                bins.append(items_in_bin)
-                position_in_bins.append(position)
-            return[bins, position_in_bins, rotation]
+                    if position[i][0] // W == j:
+                        position[i][0] = position[i][0] - j * W
+            return[bins_used, position, rotation]
 	
 def print_solution(bpp_result):
     bins = bpp_result[0]
@@ -316,15 +310,19 @@ def print_solution(bpp_result):
     print(rotation)
     for i in range(len(bins)):
         print("Bin", i + 1, "contains items", [(j + 1) for j in bins[i]])
-        display_solution((W, H), [items[j] for j in bins[i]], pos[i], [rotation[j] for j in bins[i]])
+        for j in bins[i]:
+            if rotation[j]:
+                print("Rotated item", j + 1, items[j], "at position", pos[j])
+            else:
+                print("Item", j + 1, items[j], "at position", pos[j])
+        display_solution((W, H), [items[j] for j in bins[i]], [pos[j] for j in bins[i]], [rotation[j] for j in bins[i]])
 
-input = read_file_instance("input_data/ins-1.txt")
+input = read_file_instance("input_data/ins-2.txt")
 n = int(input[0])
 bin_size = input[1].split()
 W = int(bin_size[0])
 H = int(bin_size[1])
 items = [[int(val) for val in i.split()] for i in input[2:]]
-
 
 bpp_result = BPP(W, H, items, n)
 print_solution(bpp_result)
