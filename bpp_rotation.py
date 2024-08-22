@@ -195,6 +195,9 @@ def OPP(rectangles, n, W, H):
                     cnf.append([-variables[f"r{i + 1}"]])
                     cnf.append([-variables[f"r{j + 1}"]])
                     non_overlapping(False,i ,j, True, False, True, True)
+                else:
+                    non_overlapping(False,i ,j, True, False, True, True)
+                    non_overlapping(True,i ,j, True, False, True, True)
            # #normal rectangles
             else:
                 non_overlapping(False, i, j, True, True, True, True)
@@ -317,7 +320,7 @@ def print_solution(bpp_result):
                 print("Item", j + 1, items[j], "at position", pos[j])
         display_solution((W, H), [items[j] for j in bins[i]], [pos[j] for j in bins[i]], [rotation[j] for j in bins[i]])
 
-input = read_file_instance("input_data/ins-2.txt")
+input = read_file_instance("input_data/ins-10.txt")
 n = int(input[0])
 bin_size = input[1].split()
 W = int(bin_size[0])
