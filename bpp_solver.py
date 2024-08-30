@@ -9,9 +9,7 @@ import matplotlib.pyplot as plt
 import timeit
 
 class TimeoutException(Exception): pass
-
-def interrupt(solver):
-    solver.interrupt()
+start = timeit.default_timer()
 
 #read file
 def read_file_instance(filepath):
@@ -208,17 +206,13 @@ def OPP(rectangles, n, W, H):
             for i in range(len(rectangles)):
                 for e in range(width - rectangles[i][0] + 1):
                     if result[f"px{i + 1},{e}"] == False and result[f"px{i + 1},{e + 1}"] == True:
-                        print(f"x{i + 1} = {e + 1}")
                         pos[i][0] = e + 1
                     if e == 0 and result[f"px{i + 1},{e}"] == True:
-                        print(f"x{i + 1} = 0")
                         pos[i][0] = 0
                 for f in range(height - rectangles[i][1] + 1):
                     if result[f"py{i + 1},{f}"] == False and result[f"py{i + 1},{f + 1}"] == True:
-                        print(f"y{i + 1} = {f + 1}")
                         pos[i][1] = f + 1
                     if f == 0 and result[f"py{i + 1},{f}"] == True:
-                        print(f"y{i + 1} = 0")
                         pos[i][1] = 0
             print(pos)
             return(["sat", pos])
@@ -249,10 +243,9 @@ def print_solution(bpp_result):
         print("Bin", i + 1, "contains items", [(j + 1) for j in bins_used[i]])
         for j in bins_used[i]:
             print("Item", j + 1, items[j], "at position", position[j])
-        display_solution((W, H), [items[j] for j in bins_used[i]], [position[j] for j in bins_used[i]])
+        # display_solution((W, H), [items[j] for j in bins_used[i]], [position[j] for j in bins_used[i]])
 
-
-input = read_file_instance("input_data/ins-2.txt")
+input = read_file_instance("input_data/ins-5.txt")
 n = int(input[0])
 bin_size = input[1].split()
 W = int(bin_size[0])
@@ -261,3 +254,5 @@ items = [[int(val) for val in i.split()] for i in input[2:]]
 
 bpp_result = BPP(W, H, items, n)
 print_solution(bpp_result)
+stop = timeit.default_timer()
+print('Time: ', stop - start)

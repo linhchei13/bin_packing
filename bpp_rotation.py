@@ -10,7 +10,7 @@ import timeit
 
 class TimeoutException(Exception): pass
 # Initialize the CNF formula
-
+start = timeit.default_timer()
 #read file
 def read_file_instance(filepath):
     f = open(filepath)
@@ -248,7 +248,7 @@ def OPP(rectangles, n, W, H):
             cnf.append([-variables[f"r{i + 1}"], -variables[f"px{i + 1},{k * W - w}"],
                         variables[f"px{i + 1},{k * W - 1}"]])
             
-
+    
     with Solver(name="mc") as solver: #add all cnf to solver
         solver.append_formula(cnf)
 
@@ -268,17 +268,13 @@ def OPP(rectangles, n, W, H):
                 rotation.append(result[f"r{i + 1}"])
                 for e in range(width - 1):
                     if result[f"px{i + 1},{e}"] == False and result[f"px{i + 1},{e + 1}"] == True:
-                        print(f"x{i + 1} = {e + 1}")
                         pos[i][0] = e + 1
                     if e == 0 and result[f"px{i + 1},{e}"] == True:
-                        print(f"x{i + 1} = 0")
                         pos[i][0] = 0
                 for f in range(height - 1):
                     if result[f"py{i + 1},{f}"] == False and result[f"py{i + 1},{f + 1}"] == True:
-                        print(f"y{i + 1} = {f + 1}")
                         pos[i][1] = f + 1
                     if f == 0 and result[f"py{i + 1},{f}"] == True:
-                        print(f"y{i + 1} = 0")
                         pos[i][1] = 0
             print(pos, rotation)
             return(["sat", pos, rotation])
@@ -286,11 +282,14 @@ def OPP(rectangles, n, W, H):
         else:
             print("unsat")
             return("unsat")
-
+def interrupt(solver):
+    solver.interrupt()
+    
 def BPP(W, H, items, n):
     items_area = [i[0] * i[1] for i in items]
     bin_area = W * H
     lower_bound = math.ceil(sum(items_area) / bin_area)
+    
     for k in range(lower_bound, n + 1):
         print(f"Trying with {k} bins")
         result = OPP(items, k, W, H)
@@ -318,9 +317,9 @@ def print_solution(bpp_result):
                 print("Rotated item", j + 1, items[j], "at position", pos[j])
             else:
                 print("Item", j + 1, items[j], "at position", pos[j])
-        display_solution((W, H), [items[j] for j in bins[i]], [pos[j] for j in bins[i]], [rotation[j] for j in bins[i]])
+        # display_solution((W, H), [items[j] for j in bins[i]], [pos[j] for j in bins[i]], [rotation[j] for j in bins[i]])
 
-input = read_file_instance("input_data/ins-10.txt")
+input = read_file_instance("input_data/ins-2.txt")
 n = int(input[0])
 bin_size = input[1].split()
 W = int(bin_size[0])
@@ -329,3 +328,5 @@ items = [[int(val) for val in i.split()] for i in input[2:]]
 
 bpp_result = BPP(W, H, items, n)
 print_solution(bpp_result)
+stop = timeit.default_timer()
+print("Time:", stop - start)
