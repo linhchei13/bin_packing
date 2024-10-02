@@ -1,12 +1,29 @@
 from itertools import chain, combinations
 import math
+import os
 from threading import Timer
 
+import pandas as pd
 from pysat.formula import CNF
 from pysat.solvers import Solver
 
 import matplotlib.pyplot as plt
 import timeit
+
+from typing import List
+from pysat.solvers import Glucose3, Solver
+from prettytable import PrettyTable
+from threading import Timer
+import datetime
+import pandas as pd
+import os
+import sys
+import time
+from openpyxl import load_workbook
+from openpyxl import Workbook
+from zipfile import BadZipFile
+from openpyxl.utils.dataframe import dataframe_to_rows
+from datetime import datetime
 
 class TimeoutException(Exception): pass
 # Initialize the CNF formula
@@ -44,43 +61,41 @@ def display_solution(strip, rectangles, pos_circuits, rotation):
     # display plot
     plt.show()
 
-def OPP(rectangles, n, W, H):
+def generate_all_clauses(rectangles, n, W, H):
 # Define the variables
     height = H
     width = n * W
-    cnf = CNF()
+    clauses = []
     variables = {}
-    counter = 1
+    id_variables = 1
 
     for i in range(len(rectangles)):
         for j in range(len(rectangles)):
             if i != j:
-                variables[f"lr{i + 1},{j + 1}"] = counter  # lri,rj
-                counter += 1
-                variables[f"ud{i + 1},{j + 1}"] = counter  # uri,rj
-                counter += 1
+                variables[f"lr{i + 1},{j + 1}"] = id_variables  # lri,rj
+                id_variables += 1
+                variables[f"ud{i + 1},{j + 1}"] = id_variables  # uri,rj
+                id_variables += 1
         for e in range(width):
-            variables[f"px{i + 1},{e}"] = counter  # pxi,e
-            counter += 1
+            variables[f"px{i + 1},{e}"] = id_variables  # pxi,e
+            id_variables += 1
         for f in range(height):
-            variables[f"py{i + 1},{f}"] = counter  # pyi,f
-            counter += 1
+            variables[f"py{i + 1},{f}"] = id_variables  # pyi,f
+            id_variables += 1
 
     # Rotated variables
     for i in range(len(rectangles)):
-        variables[f"r{i + 1}"] = counter
-        counter += 1
+        variables[f"r{i + 1}"] = id_variables
+        id_variables += 1
 
     # Add the 2-literal axiom clauses
     for i in range(len(rectangles)):
         for e in range(width - 1):  # -1 because we're using e+1 in the clause
-            cnf.append([-variables[f"px{i + 1},{e}"],
+            clauses.append([-variables[f"px{i + 1},{e}"],
                         variables[f"px{i + 1},{e + 1}"]])
         for f in range(height - 1):  # -1 because we're using f+1 in the clause
-            cnf.append([-variables[f"py{i + 1},{f}"],
+            clauses.append([-variables[f"py{i + 1},{f}"],
                         variables[f"py{i + 1},{f + 1}"]])
-
-
     # Add non-overlapping constraints
 
     def non_overlapping(rotated, i, j, h1, h2, v1, v2):
@@ -102,13 +117,13 @@ def OPP(rectangles, n, W, H):
         # Square symmertry breaking, if i is square than it cannot be rotated
         if i_width == i_height and rotated:
             i_square = True
-            cnf.append([-variables[f"r{i + 1}"]])
+            clauses.append([-variables[f"r{i + 1}"]])
         else:
             i_square = False
 
         if j_width == j_height and rotated:
             j_square = True
-            cnf.append([-variables[f"r{j + 1}"]])
+            clauses.append([-variables[f"r{j + 1}"]])
         else:
             j_square = False
 
@@ -119,38 +134,38 @@ def OPP(rectangles, n, W, H):
         if v1: four_literal.append(variables[f"ud{i + 1},{j + 1}"])
         if v2: four_literal.append(variables[f"ud{j + 1},{i + 1}"])
 
-        cnf.append(four_literal + [i_rotation])
-        cnf.append(four_literal + [j_rotation])
+        clauses.append(four_literal + [i_rotation])
+        clauses.append(four_literal + [j_rotation])
 
         # ¬lri, j ∨ ¬pxj, e
         if h1 and not i_square:
             for e in range(min(width, i_width)):
-                    cnf.append([i_rotation,
+                    clauses.append([i_rotation,
                                 -variables[f"lr{i + 1},{j + 1}"],
                                 -variables[f"px{j + 1},{e}"]])
         # ¬lrj,i ∨ ¬pxi,e
         if h2 and not j_square:
             for e in range(min(width, j_width)):
-                    cnf.append([j_rotation,
+                    clauses.append([j_rotation,
                                 -variables[f"lr{j + 1},{i + 1}"],
                                 -variables[f"px{i + 1},{e}"]])
         # ¬udi,j ∨ ¬pyj,f
         if v1 and not i_square:
             for f in range(min(height, i_height)):
-                    cnf.append([i_rotation,
+                    clauses.append([i_rotation,
                                 -variables[f"ud{i + 1},{j + 1}"],
                                 -variables[f"py{j + 1},{f}"]])
         # ¬udj, i ∨ ¬pyi, f,
         if v2 and not j_square:
             for f in range(min(height, j_height)):
-                    cnf.append([j_rotation,
+                    clauses.append([j_rotation,
                                 -variables[f"ud{j + 1},{i + 1}"],
                                 -variables[f"py{i + 1},{f}"]])
 
         for e in positive_range(width - i_width):
             # ¬lri,j ∨ ¬pxj,e+wi ∨ pxi,e
             if h1 and not i_square:
-                    cnf.append([i_rotation,
+                    clauses.append([i_rotation,
                                 -variables[f"lr{i + 1},{j + 1}"],
                                 variables[f"px{i + 1},{e}"],
                                 -variables[f"px{j + 1},{e + i_width}"]])
@@ -158,7 +173,7 @@ def OPP(rectangles, n, W, H):
         for e in positive_range(width - j_width):
             # ¬lrj,i ∨ ¬pxi,e+wj ∨ pxj,e
             if h2 and not j_square:
-                    cnf.append([j_rotation,
+                    clauses.append([j_rotation,
                                 -variables[f"lr{j + 1},{i + 1}"],
                                 variables[f"px{j + 1},{e}"],
                                 -variables[f"px{i + 1},{e + j_width}"]])
@@ -166,14 +181,14 @@ def OPP(rectangles, n, W, H):
         for f in positive_range(height - i_height):
             # udi,j ∨ ¬pyj,f+hi ∨ pxi,e
             if v1 and not i_square:
-                    cnf.append([i_rotation,
+                    clauses.append([i_rotation,
                                 -variables[f"ud{i + 1},{j + 1}"],
                                 variables[f"py{i + 1},{f}"],
                                 -variables[f"py{j + 1},{f + i_height}"]])
         for f in positive_range(height - j_height):
             # ¬udj,i ∨ ¬pyi,f+hj ∨ pxj,f
             if v2 and not j_square:
-                    cnf.append([j_rotation,
+                    clauses.append([j_rotation,
                                 -variables[f"ud{j + 1},{i + 1}"],
                                 variables[f"py{j + 1},{f}"],
                                 -variables[f"py{i + 1},{f + j_height}"]])
@@ -192,8 +207,8 @@ def OPP(rectangles, n, W, H):
             # Same rectangle and is a square
             elif rectangles[i] == rectangles[j]:
                 if rectangles[i][0] == rectangles[i][1]:
-                    cnf.append([-variables[f"r{i + 1}"]])
-                    cnf.append([-variables[f"r{j + 1}"]])
+                    clauses.append([-variables[f"r{i + 1}"]])
+                    clauses.append([-variables[f"r{j + 1}"]])
                     non_overlapping(False,i ,j, True, False, True, True)
                 else:
                     non_overlapping(False,i ,j, True, False, True, True)
@@ -206,56 +221,72 @@ def OPP(rectangles, n, W, H):
     # Domain encoding to ensure every rectangle stays inside strip's boundary
     for i in range(len(rectangles)):
         if rectangles[i][0] > width: #if rectangle[i]'s width larger than strip's width, it has to be rotated
-            cnf.append([variables[f"r{i + 1}"]])
+            clauses.append([variables[f"r{i + 1}"]])
         else:
             for e in range(width - rectangles[i][0], width):
-                    cnf.append([variables[f"r{i + 1}"],
+                    clauses.append([variables[f"r{i + 1}"],
                                 variables[f"px{i + 1},{e}"]])
         if rectangles[i][1] > height:
-            cnf.append([variables[f"r{i + 1}"]])
+            clauses.append([variables[f"r{i + 1}"]])
         else:
             for f in range(height - rectangles[i][1], height):
-                    cnf.append([variables[f"r{i + 1}"],
+                    clauses.append([variables[f"r{i + 1}"],
                                 variables[f"py{i + 1},{f}"]])
 
         # Rotated
         if rectangles[i][1] > width:
-            cnf.append([-variables[f"r{i + 1}"]])
+            clauses.append([-variables[f"r{i + 1}"]])
         else:
-            for e in range(width - rectangles[i][1], width):
-                    cnf.append([-variables[f"r{i + 1}"],
-                                variables[f"px{i + 1},{e}"]])
+            
+            clauses.append([-variables[f"r{i + 1}"],
+                                variables[f"px{i + 1},{width - rectangles[i][1]}"]])
         if rectangles[i][0] > height:
-            cnf.append([-variables[f"r{i + 1}"]])
+            clauses.append([-variables[f"r{i + 1}"]])
         else:
-            for f in range(height - rectangles[i][0], height):
-                cnf.append([-variables[f"r{i + 1}"],
-                            variables[f"py{i + 1},{f}"]])
+            clauses.append([-variables[f"r{i + 1}"],
+                            variables[f"py{i + 1},{height - rectangles[i][0]}"]])
 
     for k in range(1, n):
          for i in range(len(rectangles)):
             # Not rotated
             w = rectangles[i][0]
-            cnf.append([variables[f"r{i + 1}"], variables[f"px{i + 1},{k * W - w}"],
+            clauses.append([variables[f"r{i + 1}"], variables[f"px{i + 1},{k * W - w}"],
                         -variables[f"px{i + 1},{k * W - 1}"]])
-            cnf.append([variables[f"r{i + 1}"], -variables[f"px{i + 1},{k * W - w}"],
+            clauses.append([variables[f"r{i + 1}"], -variables[f"px{i + 1},{k * W - w}"],
                         variables[f"px{i + 1},{k * W - 1}"]])
             
             # Rotated
             w = rectangles[i][1]
-            cnf.append([-variables[f"r{i + 1}"], variables[f"px{i + 1},{k * W - w}"],
+            clauses.append([-variables[f"r{i + 1}"], variables[f"px{i + 1},{k * W - w}"],
                         -variables[f"px{i + 1},{k * W - 1}"]])
-            cnf.append([-variables[f"r{i + 1}"], -variables[f"px{i + 1},{k * W - w}"],
+            clauses.append([-variables[f"r{i + 1}"], -variables[f"px{i + 1},{k * W - w}"],
                         variables[f"px{i + 1},{k * W - 1}"]])
             
-    
-    with Solver(name="mc") as solver: #add all cnf to solver
-        solver.append_formula(cnf)
+    return clauses, variables
 
-        if solver.solve():
+def solve_sat_problem(rectangles, n_items, W, H):
+    clauses, variables = generate_all_clauses(items, n_items, W, H)
+    width = W * n_items
+    height = H
+    solver = Solver(use_timer=True)
+    sat_status = False
+    def interrupt(solver):
+        solver.interrupt()
+        
+    for clause in clauses:
+        solver.add_clause(clause)
+    
+    timer = Timer(time_budget, interrupt, [solver])
+    timer.start()
+    start = time.time()
+    try: 
+        sat_status = solver.solve_limited(expect_interrupt=True)
+        if sat_status:
             pos = [[0 for i in range(2)] for j in range(len(rectangles))]
             rotation = []
             model = solver.get_model()
+            solver_time = format(time.time() - start, ".3f")
+            
             print("SAT")
             result = {}
             for var in model:
@@ -275,58 +306,123 @@ def OPP(rectangles, n, W, H):
                     if result[f"py{i + 1},{f}"] == False and result[f"py{i + 1},{f + 1}"] == True:
                         pos[i][1] = f + 1
                     if f == 0 and result[f"py{i + 1},{f}"] == True:
-                        pos[i][1] = 0
-            print(pos, rotation)
-            return(["sat", pos, rotation])
+                        pos[i][1] = 0  
+            timer.cancel()
+            return "sat", pos, rotation, solver_time, len(variables), len(clauses)
 
         else:
+            timer.cancel()
             print("unsat")
             return("unsat")
-def interrupt(solver):
-    solver.interrupt()
+    except TimeoutException:
+        print("Timeout")
+        return("timeout")
+    
     
 def BPP(W, H, items, n):
     items_area = [i[0] * i[1] for i in items]
     bin_area = W * H
     lower_bound = math.ceil(sum(items_area) / bin_area)
     
+    start = timeit.default_timer()
     for k in range(lower_bound, n + 1):
         print(f"Trying with {k} bins")
-        result = OPP(items, k, W, H)
+        result = solve_sat_problem(items, k, W, H)
+        
         if result[0] == "sat":
-            print(f"Solution found with {k} bins")
-            position = result[1]
-            bins_used = [[i for i in range(n) if position[i][0] // W == j] for j in range(k)]
-            rotation = result[2]
-            for j in range(k):
-                for i in range(n):
-                    if position[i][0] // W == j:
-                        position[i][0] = position[i][0] - j * W
-            return[bins_used, position, rotation]
-	
-def print_solution(bpp_result):
-    bins = bpp_result[0]
-    pos = bpp_result[1]
-    rotation = bpp_result[2]
-    print(pos)
-    print(rotation)
-    for i in range(len(bins)):
-        print("Bin", i + 1, "contains items", [(j + 1) for j in bins[i]])
-        for j in bins[i]:
-            if rotation[j]:
-                print("Rotated item", j + 1, items[j], "at position", pos[j])
-            else:
-                print("Item", j + 1, items[j], "at position", pos[j])
-        # display_solution((W, H), [items[j] for j in bins[i]], [pos[j] for j in bins[i]], [rotation[j] for j in bins[i]])
+                print(f"Solution found with {k} bins")
+                position = result[1]
+                bins_used = [[i for i in range(n) if position[i][0] // W == j] for j in range(k)]
+                rotation = result[2]
+                solver_time = result[3]
+                num_variables = result[4]
+                num_clauses = result[5]
+                for j in range(k):
+                    for i in range(n):
+                        if position[i][0] // W == j:
+                            position[i][0] = position[i][0] - j * W
+                return bins_used, position, rotation, solver_time, num_variables, num_clauses
+        
 
-input = read_file_instance("input_data/ins-2.txt")
-n = int(input[0])
+def write_to_xlsx(result_dict):
+    # Append the result to a list
+    excel_results = []
+    excel_results.append(result_dict)
+
+    output_path = online_path + 'out/'
+
+    # Write the results to an Excel file
+    if not os.path.exists(output_path): os.makedirs(output_path)
+    df = pd.DataFrame(excel_results)
+    current_date = datetime.now().strftime('%Y-%m-%d')
+    excel_file_path = f"{output_path}/results_{current_date}.xlsx"
+
+    # Check if the file already exists
+    if os.path.exists(excel_file_path):
+        try:
+            book = load_workbook(excel_file_path)
+        except BadZipFile:
+            book = Workbook()  # Create a new workbook if the file is not a valid Excel file
+
+        # Check if the 'Results' sheet exists
+        if 'Results' not in book.sheetnames:
+            book.create_sheet('Results')  # Create 'Results' sheet if it doesn't exist
+
+        sheet = book['Results']
+        for row in dataframe_to_rows(df, index=False, header=False): sheet.append(row)
+        book.save(excel_file_path)
+
+    else: df.to_excel(excel_file_path, index=False, sheet_name='Results', header=False)
+
+    print(f"Result added to Excel file: {os.path.abspath(excel_file_path)}\n")
+
+
+
+def print_solution(bpp_result):
+    result_dict = {}
+    if bpp_result == "timeout":
+        result_dict = {
+            "Number of items": n_items,
+            "Minimize Bin": "N/A",  
+            "Solver time": "Timeout", 
+            "Number of variables": "Timeout", 
+            "Number of clauses": "Timeout"}
+    else:
+        bins, pos, rotation, solver_time, num_variables, num_clauses = bpp_result
+        for i in range(len(bins)):
+            print("Bin", i + 1, "contains items", [(j + 1) for j in bins[i]])
+            for j in bins[i]:
+                if rotation[j]:
+                    print("Rotated item", j + 1, items[j], "at position", pos[j])
+                else:
+                    print("Item", j + 1, items[j], "at position", pos[j])
+            display_solution((W, H), [items[j] for j in bins[i]], [pos[j] for j in bins[i]], [rotation[j] for j in bins[i]])
+        print("--------------------")
+        print("Solution found with", len(bins), "bins")
+        print(f"Solver time: {solver_time} seconds")
+        print("Number of variables:", num_variables)
+        print("Number of clauses:", num_clauses)
+        result_dict = {
+            "Type": "using OPP",
+            "Number of items": n_items,
+            "Minimize Bin": len(bins),  
+            "Solver time": solver_time, 
+            "Number of variables": num_variables, 
+            "Number of clauses": num_clauses}
+    write_to_xlsx(result_dict)
+    
+
+input = read_file_instance("input_data/test.txt")
+n_items = int(input[0])
 bin_size = input[1].split()
 W = int(bin_size[0])
 H = int(bin_size[1])
 items = [[int(val) for val in i.split()] for i in input[2:]]
-
-bpp_result = BPP(W, H, items, n)
+online_path = ''
+time_budget = 60
+time_limit = 60
+bpp_result = BPP(W, H, items, n_items)
 print_solution(bpp_result)
 stop = timeit.default_timer()
-print("Time:", stop - start)
+print("Running time:", format((stop - start), ".3f"), "seconds")
+
