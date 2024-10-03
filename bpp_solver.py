@@ -9,9 +9,14 @@ import matplotlib.pyplot as plt
 import timeit
 
 class TimeoutException(Exception): pass
-start = timeit.default_timer()
 
 #read file
+def read_input():
+    global W, H, items, n_items
+    n_items = int(input().split()[0])
+    W, H = map(int, input().split())
+    for i in range(n_items):
+        items.append(list(map(int, input().split())))
 def read_file_instance(filepath):
     f = open(filepath)
     return f.read().splitlines()
@@ -245,7 +250,7 @@ def print_solution(bpp_result):
             print("Item", j + 1, items[j], "at position", position[j])
         # display_solution((W, H), [items[j] for j in bins_used[i]], [position[j] for j in bins_used[i]])
 
-input = read_file_instance("input_data/ins-5.txt")
+input = read_file_instance("input_data/test.txt")
 n = int(input[0])
 bin_size = input[1].split()
 W = int(bin_size[0])
@@ -255,4 +260,3 @@ items = [[int(val) for val in i.split()] for i in input[2:]]
 bpp_result = BPP(W, H, items, n)
 print_solution(bpp_result)
 stop = timeit.default_timer()
-print('Time: ', stop - start)

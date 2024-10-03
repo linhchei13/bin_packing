@@ -112,8 +112,8 @@ def main_solver(file_path, time_limit):
         model.Add(Z[j] == 1).OnlyEnforceIf(b1.Not())
 
     # Objective function
-    bin_used = sum(Z[j] for j in range(n_bins))
-    model.Minimize(bin_used)
+    cost = sum(Z[j] * bins[j][2] for j in range(n_bins))
+    model.Minimize(cost)
 
     # Creates a solver and solves the model
     solver = cp_model.CpSolver()

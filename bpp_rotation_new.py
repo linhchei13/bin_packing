@@ -24,27 +24,19 @@ from datetime import datetime
 
 class TimeoutException(Exception): pass
 # Initialize the CNF formula
-start = timeit.default_timer()
+n_items = 0
+W, H = 0, 0
+items = []
+
 #read file
-def read_input(file_path):
-    '''
-        Return number of packs (n_packs); number of bins (n_bins); 
-        and two tuple of pack's width and height; bin's width, height and cost.
-
-        file_path: path to file containing the input data
-    '''
-    with open(file_path) as f:
-        data = f.readlines()
-        n_packs, n_bins = map(int, data[0].split())
-        packs, bins = [], []
-
-        for i in range(1, n_packs+1):
-            packs.append(tuple(map(int, data[i].split())))
-
-        for i in range(n_packs+1, len(data)):
-            bins.append(tuple(map(int, data[i].split())))
-
-    return n_packs, n_bins, packs, bins
+def read_input():
+    global W, H, items, n_items
+    n_items = int(input().split()[0])
+    W, H = map(int, input().split())
+    for i in range(n_items):
+        list = input().split() 
+        items.append([int(list[1]), int(list[2])])
+        print(items)
     
 def read_file_instance(filepath):
     f = open(filepath)
@@ -54,7 +46,8 @@ def positive_range(end):
     if (end < 0):
         return []
     return range(end)
-
+def compare_item_by_longer_side(item):
+    return max(item[0], item[1])
 def BPP_result(rectangles, W, H, max_bins, n_items):
 # Define the variables
     height = H
@@ -227,18 +220,30 @@ def BPP_result(rectangles, W, H, max_bins, n_items):
     # Domain encoding to ensure every rectangle stays inside strip's boundary
     for i2 in range(max_bins):
         for i in range(len(rectangles)):
-            cnf.append([-variables[f"x{i + 1},{i2 + 1}"], variables[f"r{i + 1}"],
-                                variables[f"px{i + 1},{width - rectangles[i][0]}"]])
+            if rectangles[i][0] > width: #if rectangle[i]'s width larger than strip's width, it has to be rotated
+                cnf.append([variables[f"r{i + 1}"]])
+            else:
+                cnf.append([variables[f"r{i + 1}"],
+                                    variables[f"px{i + 1},{width - rectangles[i][0]}"]])
        
-            cnf.append([-variables[f"x{i + 1},{i2 + 1}"],variables[f"r{i + 1}"],
+            if rectangles[i][1] > height:
+                cnf.append([variables[f"r{i + 1}"]])
+            else:
+                cnf.append([variables[f"r{i + 1}"],
                             variables[f"py{i + 1},{height - rectangles[i][1]}"]])
 
             # Rotated
-            cnf.append([-variables[f"x{i + 1},{i2 + 1}"], -variables[f"r{i + 1}"],
-                                variables[f"px{i + 1},{width - rectangles[i][1]}"]])
-       
-            cnf.append([-variables[f"x{i + 1},{i2 + 1}"], -variables[f"r{i + 1}"],
-                            variables[f"py{i + 1},{height - rectangles[i][0]}"]])
+            if rectangles[i][1] > width:
+                cnf.append([-variables[f"r{i + 1}"]])
+            else:
+                
+                cnf.append([-variables[f"r{i + 1}"],
+                                    variables[f"px{i + 1},{width - rectangles[i][1]}"]])
+            if rectangles[i][0] > height:
+                cnf.append([-variables[f"r{i + 1}"]])
+            else:
+                cnf.append([-variables[f"r{i + 1}"],
+                                variables[f"py{i + 1},{height - rectangles[i][0]}"]])
     start = timeit.default_timer()
     with Solver(name="mc") as solver: #add all cnf to solver
         solver.append_formula(cnf)
@@ -270,9 +275,6 @@ def BPP_result(rectangles, W, H, max_bins, n_items):
                         pos[i][1] = 0
             for i2 in range(max_bins):
                 bin_used.append([i for i in range(n_items) if result[f"x{i + 1},{i2 + 1}"] == True])
-            print(result)
-
-            print(pos, rotation, bin_used)
             return(["sat", bin_used, pos, rotation, solver_time, len(variables), len(cnf.clauses)])
 
         else:
@@ -285,7 +287,7 @@ def BPP(W, H, items, n_items, max_bins):
     items_area = [i[0] * i[1] for i in items]
     bin_area = W * H
     lower_bound = math.ceil(sum(items_area) / bin_area)
-    
+    print(sum(items_area))
     for k in range(lower_bound, max_bins + 1):
         print(f"Trying with {k} bins")
         result = BPP_result(items, W, H, max_bins=k, n_items=n_items)
@@ -317,7 +319,7 @@ def print_solution(bpp_result):
                     print("Rotated item", j + 1, items[j], "at position", pos[j])
                 else:
                     print("Item", j + 1, items[j], "at position", pos[j])
-            display_solution((W, H), [items[j] for j in bins[i]], [pos[j] for j in bins[i]], [rotation[j] for j in bins[i]])
+            # display_solution((W, H), [items[j] for j in bins[i]], [pos[j] for j in bins[i]], [rotation[j] for j in bins[i]])
         print("--------------------")
         print("Solution found with", len(bins), "bins")
         print("Solver time:", solver_time)
@@ -325,6 +327,7 @@ def print_solution(bpp_result):
         print("Number of clauses:", num_clauses)
         result_dict = {
             "Type": "not using OPP",
+            "Data": os.path.basename(sys.argv[1]),
             "Number of items": n_items,
             "Minimize Bin": len(bins),  
             "Solver time": solver_time, 
@@ -341,7 +344,6 @@ def write_to_xlsx(result_dict):
 
     # Write the results to an Excel file
     if not os.path.exists(output_path): os.makedirs(output_path)
-    print(result_dict.keys())
     df = pd.DataFrame(excel_results)
     current_date = datetime.now().strftime('%Y-%m-%d')
     excel_file_path = f"{output_path}/results_{current_date}.xlsx"
@@ -387,14 +389,27 @@ def display_solution(strip, rectangles, pos_circuits, rotation):
     # display plot
     plt.show()
 
-input = read_file_instance("input_data/test.txt")
-n_items = int(input[0])
-bin_size = input[1].split()
-W = int(bin_size[0])
-H = int(bin_size[1])
-items = [[int(val) for val in i.split()] for i in input[2:]]
+def main():
+    # read input file
+    global W, H, items, n_items
+    if len(sys.argv) < 2:
+        print("Error: No file name provided.")
+        return
+    
+    with open(sys.argv[1], 'r') as f:
+        sys.stdin = f
+        
+        start = time.time()
+        
+        read_input()
+        print(W, H)
 
-bpp_result = BPP(W, H, items, n_items, n_items)
-print_solution(bpp_result)
-stop = timeit.default_timer()
-print("Time:", stop - start)
+        bpp_result = BPP(W, H, items, n_items, n_items)
+        stop = time.time()
+        
+    
+        print_solution(bpp_result)
+        print("Time:", stop - start)
+
+if __name__ == "__main__":
+    main()

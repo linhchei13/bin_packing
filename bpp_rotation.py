@@ -27,7 +27,20 @@ from datetime import datetime
 
 class TimeoutException(Exception): pass
 # Initialize the CNF formula
-start = timeit.default_timer()
+n_items = 0
+W, H = 0, 0
+items = []
+time_budget = 60
+#read file
+def read_input():
+    global W, H, items, n_items
+    n_items = int(input().split()[0])
+    W, H = map(int, input().split())
+    for i in range(n_items):
+        list = input().split() 
+        items.append([int(list[1]), int(list[2])])
+        print(items)
+    
 #read file
 def read_file_instance(filepath):
     f = open(filepath)
@@ -220,31 +233,29 @@ def generate_all_clauses(rectangles, n, W, H):
 
     # Domain encoding to ensure every rectangle stays inside strip's boundary
     for i in range(len(rectangles)):
-        if rectangles[i][0] > width: #if rectangle[i]'s width larger than strip's width, it has to be rotated
-            clauses.append([variables[f"r{i + 1}"]])
-        else:
-            for e in range(width - rectangles[i][0], width):
-                    clauses.append([variables[f"r{i + 1}"],
-                                variables[f"px{i + 1},{e}"]])
-        if rectangles[i][1] > height:
-            clauses.append([variables[f"r{i + 1}"]])
-        else:
-            for f in range(height - rectangles[i][1], height):
-                    clauses.append([variables[f"r{i + 1}"],
-                                variables[f"py{i + 1},{f}"]])
+            if rectangles[i][0] > width: #if rectangle[i]'s width larger than strip's width, it has to be rotated
+                clauses.append([variables[f"r{i + 1}"]])
+            else:
+                clauses.append([variables[f"r{i + 1}"],
+                                    variables[f"px{i + 1},{width - rectangles[i][0]}"]])
+       
+            if rectangles[i][1] > height:
+                clauses.append([variables[f"r{i + 1}"]])
+            else:
+                clauses.append([variables[f"r{i + 1}"],
+                            variables[f"py{i + 1},{height - rectangles[i][1]}"]])
 
-        # Rotated
-        if rectangles[i][1] > width:
-            clauses.append([-variables[f"r{i + 1}"]])
-        else:
-            
-            clauses.append([-variables[f"r{i + 1}"],
-                                variables[f"px{i + 1},{width - rectangles[i][1]}"]])
-        if rectangles[i][0] > height:
-            clauses.append([-variables[f"r{i + 1}"]])
-        else:
-            clauses.append([-variables[f"r{i + 1}"],
-                            variables[f"py{i + 1},{height - rectangles[i][0]}"]])
+            # Rotated
+            if rectangles[i][1] > width:
+                clauses.append([-variables[f"r{i + 1}"]])
+            else:
+                clauses.append([-variables[f"r{i + 1}"],
+                                    variables[f"px{i + 1},{width - rectangles[i][1]}"]])
+            if rectangles[i][0] > height:
+                clauses.append([-variables[f"r{i + 1}"]])
+            else:
+                clauses.append([-variables[f"r{i + 1}"],
+                                variables[f"py{i + 1},{height - rectangles[i][0]}"]])
 
     for k in range(1, n):
          for i in range(len(rectangles)):
@@ -349,7 +360,7 @@ def write_to_xlsx(result_dict):
     excel_results = []
     excel_results.append(result_dict)
 
-    output_path = online_path + 'out/'
+    output_path = 'out/'
 
     # Write the results to an Excel file
     if not os.path.exists(output_path): os.makedirs(output_path)
@@ -396,7 +407,7 @@ def print_solution(bpp_result):
                     print("Rotated item", j + 1, items[j], "at position", pos[j])
                 else:
                     print("Item", j + 1, items[j], "at position", pos[j])
-            display_solution((W, H), [items[j] for j in bins[i]], [pos[j] for j in bins[i]], [rotation[j] for j in bins[i]])
+            # display_solution((W, H), [items[j] for j in bins[i]], [pos[j] for j in bins[i]], [rotation[j] for j in bins[i]])
         print("--------------------")
         print("Solution found with", len(bins), "bins")
         print(f"Solver time: {solver_time} seconds")
@@ -404,6 +415,7 @@ def print_solution(bpp_result):
         print("Number of clauses:", num_clauses)
         result_dict = {
             "Type": "using OPP",
+            "Dataset": os.path.basename(sys.argv[1]),
             "Number of items": n_items,
             "Minimize Bin": len(bins),  
             "Solver time": solver_time, 
@@ -412,17 +424,28 @@ def print_solution(bpp_result):
     write_to_xlsx(result_dict)
     
 
-input = read_file_instance("input_data/test.txt")
-n_items = int(input[0])
-bin_size = input[1].split()
-W = int(bin_size[0])
-H = int(bin_size[1])
-items = [[int(val) for val in i.split()] for i in input[2:]]
-online_path = ''
-time_budget = 60
-time_limit = 60
-bpp_result = BPP(W, H, items, n_items)
-print_solution(bpp_result)
-stop = timeit.default_timer()
-print("Running time:", format((stop - start), ".3f"), "seconds")
+def main():
+    # read input file
+    global W, H, items, n_items
+    if len(sys.argv) < 2:
+        print("Error: No file name provided.")
+        return
+    
+    with open(sys.argv[1], 'r') as f:
+        sys.stdin = f
+        
+        start = time.time()
+        
+        read_input()
+        print(W, H)
+
+        bpp_result = BPP(W, H, items, n_items)
+        stop = time.time()
+        
+    
+        print_solution(bpp_result)
+        print("Time:", stop - start)
+
+if __name__ == "__main__":
+    main()
 

@@ -15,7 +15,7 @@ def read_integers(filename):
     with open(filename) as f:
         return [int(elem) for elem in f.read().split()]
 
-file_name = "instances/t60_00.txt"
+file_name = "instances/t60_01.txt"
 
 # Read instance data
 file_it = iter(read_integers(file_name))
@@ -32,10 +32,9 @@ cnf = CNF()
 
 # Id Set decisions: bin[k] represents the items in bin k
 bins = [[i + 1 + k * nb_items for i in range(nb_items)] for k in range(nb_max_bins)]
-print(bins)
 # Each item must be in one bin and one bin only
 for i in range(nb_items):
-    cnf.append([bins[k][i] for k in range(nb_max_bins)])  # At least one bin
+    cnf.append([bins[k][i] for k in range(nb_max_bins)])# At least one bin
     for k1 in range(nb_max_bins):
         for k2 in range(k1+1, nb_max_bins):
             cnf.append([-bins[k1][i], -bins[k2][i]])  # At most one bin
@@ -48,14 +47,12 @@ def powerset(iterable):
 # Weight constraint for each bin
 for k in range(nb_max_bins):
     for subset in powerset(range(nb_items)):
-        print("subset", subset)
         if sum(weights_data[i] for i in subset) > bin_capacity:
             # if the sum of the weights of the items in the subset is greater than the bin capacity, then the subset is not v
             cnf.append([-bins[k][i] for i in subset]) 
 
 # Bin k is used if at least one item is in it
 bins_used = [i + 1 + nb_items*nb_max_bins for i in range(nb_max_bins)]
-print(bins_used)
 for k in range(nb_max_bins):
     for i in range(nb_items):
         cnf.append([-bins[k][i], bins_used[k]])  # If item i is in bin k, bin k is used
