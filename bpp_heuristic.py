@@ -33,10 +33,12 @@ class Items:
         self.pos_bin = 0
         self.rotated = False
 
-item_guillotine = [Items() for _ in range(MAXN)]
-
 def compare_item_by_longer_side(a: Items):
     if a.height < a.width:
+        return a.width
+    return a.height 
+def compare_item_by_shoter_side(a: Items):
+    if a.height > a.width:
         return a.width
     return a.height 
 def compare_reset_item(a: Items, b: Items) -> bool:
@@ -82,20 +84,22 @@ def check_fit_rec(rec: Free_Rectangles, pack: Items, rotated: bool) -> bool:
         return True
     return False
 
-def add_item(car: Bins, pack: Items, rotated: bool, x: int, y: int):
+# Add item to bin with rotated, corner_x, corner_y
+def add_item(bin: Bins, pack: Items, rotated: bool, x: int, y: int):
     if rotated:
         rotate_item(pack)
     pack.corner_x = x
     pack.corner_y = y
-    car.list_of_items.append(pack)
-    car.free_area -= pack.area
+    bin.list_of_items.append(pack)
+    bin.free_area -= pack.area
 
 def compare_ranking_rec_BSS(a: Tuple[int, int], b: Tuple[int, int]) -> bool:
     if a[0] == b[0]:
         return a[1] < b[1]
     return a[0] < b[0]
 
-def score_rec(rec: Free_Rectangles, pack: Items, rotated: bool) -> Tuple[int, int]:
+def score_rec(rec: Free_Rectangles, pack: Items, rotated):
+    # Best Short Side: shorter remainder side after insertion is minimized, ties broken with best long
     if rotated:
         score_first = min(rec.width - pack.height, rec.height - pack.width)
         score_second = max(rec.width - pack.height, rec.height - pack.width)
@@ -104,13 +108,14 @@ def score_rec(rec: Free_Rectangles, pack: Items, rotated: bool) -> Tuple[int, in
         score_second = max(rec.width - pack.width, rec.height - pack.height)
     return (score_first, score_second)
 
-def best_ranking(car: Bins, pack: Items) -> Tuple[Tuple[Free_Rectangles, int], Tuple[bool, bool]]:
+def best_ranking(car, pack):
     rotated = False
     best_rec = Free_Rectangles()
     best_pos = 0
-    check_exist = False
+    check_exist = 0
     best_score = (inf, inf)
     
+    # Loop to find the best score
     for i, rec in enumerate(car.list_of_free_rec):
         # Not rotate case
         if check_fit_rec(rec, pack, False) and compare_ranking_rec_BSS(score_rec(rec, pack, False), best_score):
@@ -118,17 +123,17 @@ def best_ranking(car: Bins, pack: Items) -> Tuple[Tuple[Free_Rectangles, int], T
             best_rec = rec
             best_pos = i
             rotated = False
-            check_exist = True
+            check_exist = 1
+        
         # Rotate case
         if check_fit_rec(rec, pack, True) and compare_ranking_rec_BSS(score_rec(rec, pack, True), best_score):
             best_score = score_rec(rec, pack, True)
             best_rec = rec
             best_pos = i
             rotated = True
-            check_exist = True
-    
-    return ((best_rec, best_pos), (rotated, check_exist))
-
+            check_exist = 1    
+    # Prepare for returning value
+    return ((best_rec, best_pos), (rotated, bool(check_exist)))
 # PREPARE SOLUTION
 def calculate_solution() -> Tuple[int, int]:
     global bin_used
@@ -142,18 +147,19 @@ def calculate_solution() -> Tuple[int, int]:
 
 # CHECKING ITEMS AND BINS STATUS
 def checking_status(algorithm: bool, item: List[Items]):
+    global items_guillotine
+
     if algorithm == False:
         for i in range(N_items):
-            if item_guillotine[i].rotated:
-                print(f"Rotate pack {item_guillotine[i].id} and put", end=" ")
+            if items_guillotine[i].rotated:
+                print(f"Rotate pack {items_guillotine[i].id} and put", end=" ")
             else:
-                print(f"Put pack {item_guillotine[i].id}", end=" ")
-            print(f"in bin {item_guillotine[i].pos_bin} that the top right corner coordinate (x, y) is "
-                  f"({item_guillotine[i].corner_x + item_guillotine[i].width}, "
-                  f"{item_guillotine[i].corner_y + item_guillotine[i].height})")
+                print(f"Put pack {items_guillotine[i].id}", end=" ")
+            print(f"in bin {items_guillotine[i].pos_bin} that (x, y) is "
+                  f"({items_guillotine[i].corner_x + items_guillotine[i].width}, "
+                  f"{items_guillotine[i].corner_y + items_guillotine[i].height})")
     else:
-        
-        for i in range( N_items):
+        for i in range(N_items):
             if item[i].rotated:
                 print(f"Rotate pack {item[i].id} and put", end=" ")
             else:
@@ -194,7 +200,6 @@ def spliting_process_maxrec(rec: Free_Rectangles, pack: Items) -> List[Free_Rect
         new_free_rec.width    = top_width
         new_free_rec.height   = top_height
         list_of_free_rec.append(new_free_rec)
-    
     return list_of_free_rec
 
 def check_intersec_maxrec(rec: Free_Rectangles, pack: Items) -> bool:
@@ -329,6 +334,8 @@ def Solve_maxrec(N_items: int, N_bins: int, bin: List[Bins], item: List[Items]):
         for j in range(N_bins):
             if insert_item_maxrec(bin[j], item[i]):
                 break
+# GUILLLOTINE ALGORITHM
+
 
 def splitting_process_guillotine(horizontal: bool, rec: Free_Rectangles, pack: Items) -> List[Free_Rectangles]:
     list_of_free_rec = []
@@ -351,14 +358,12 @@ def splitting_process_guillotine(horizontal: bool, rec: Free_Rectangles, pack: I
         list_of_free_rec.append(new_free_rec)
     
     if top_width > 0 and top_height > 0:
-        
+        new_free_rec = Free_Rectangles()
         new_free_rec.corner_x = top_x
         new_free_rec.corner_y = top_y
         new_free_rec.width = top_width
         new_free_rec.height = top_height
         list_of_free_rec.append(new_free_rec)
-
-    
     return list_of_free_rec
 
 def splitting_guillotine(rec: Free_Rectangles, pack: Items) -> List[Free_Rectangles]:
@@ -388,10 +393,11 @@ def merge_rec_guillotine(car: Bins):
                 break
 
         if check_exist_width:
-            merged_rec = Free_Rectangles(
-                first.corner_x, first.corner_y, first.width,
-                first.height + car.list_of_free_rec[pos_check_width].height
-            )
+            merged_rec = Free_Rectangles()
+            merged_rec.corner_x = first.corner_x
+            merged_rec.corner_y = first.corner_y
+            merged_rec.width = first.width
+            merged_rec.height = first.height + car.list_of_free_rec[pos_check_width].height
             car.list_of_free_rec.pop(pos_check_width)
             if pos_check_width < i:
                 i -= 1
@@ -412,8 +418,6 @@ def merge_rec_guillotine(car: Bins):
             i -= 1
         i += 1
 
-
-
 def insert_item_guillotine(car: Bins, pack: Items) -> bool:
     best_ranking_return = best_ranking(car, pack)
     
@@ -424,7 +428,7 @@ def insert_item_guillotine(car: Bins, pack: Items) -> bool:
     best_rec, best_pos = best_ranking_return[0]
     rotated = best_ranking_return[1][0]
     
-    add_item(car, pack, best_rec.corner_x, best_rec.corner_y, rotated)
+    add_item(car, pack, rotated, best_rec.corner_x, best_rec.corner_y)
     car.list_of_free_rec.pop(best_pos)
     new_rec = splitting_guillotine(best_rec, pack)
     car.list_of_free_rec.extend(new_rec)
@@ -465,12 +469,9 @@ def enter():
             rotate_item(items[i])
         items[i].area = items[i].width * items[i].height
         items[i].id = i
-    
-    
-    items = sorted(items, key=compare_item_by_longer_side, reverse=True)
+    items = sorted(items, key=lambda x: (compare_item_by_longer_side(x), compare_item_by_shoter_side(x)), reverse=True)
 def reset():
     global items_guillotine, items, bins
-    
     items_guillotine = items.copy()
 
     for i in range(N_items):
@@ -493,12 +494,11 @@ def solve():
     enter()
     solve_guillotine(items, bins)
     guillotine_result = calculate_solution()
-    print(guillotine_result)
     reset()
-    
     Solve_maxrec(N_items, N_bins, bins, items)
     maxrec_result = calculate_solution()
-    
+    print("Guillotine:", guillotine_result)
+    print("Max rect:", maxrec_result)
     if guillotine_result < maxrec_result:
         bin_used = guillotine_result
         check_algorithm = 0
@@ -572,11 +572,13 @@ def write_to_xlsx(result_dict):
 
 
 def main():
+    file = ''
     if len(sys.argv) < 2:
         print("Error: No file name provided.")
-        return
-    
-    with open(sys.argv[1], 'r') as f:
+        file = "input_data/BENG/BENG/BENG01.ins2D"
+    else:
+        file = sys.argv[1]
+    with open(file, 'r') as f:
         sys.stdin = f
         
         start_timing = time.time()
