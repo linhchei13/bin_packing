@@ -38,13 +38,7 @@ def read_input():
     W, H = map(int, input().split())
     for i in range(n_items):
         list = input().split() 
-        items.append([int(list[1]), int(list[2])])
-        print(items)
-    
-#read file
-def read_file_instance(filepath):
-    f = open(filepath)
-    return f.read().splitlines()
+        items.append([int(list[0]), int(list[1])])
 
 def positive_range(end):
     if (end < 0):
@@ -424,7 +418,7 @@ def print_solution(bpp_result):
     write_to_xlsx(result_dict)
     
 
-def main():
+def solve():
     # read input file
     global W, H, items, n_items
     if len(sys.argv) < 2:
@@ -447,5 +441,5 @@ def main():
         print("Time:", stop - start)
 
 if __name__ == "__main__":
-    main()
+    solve()
 

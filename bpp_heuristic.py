@@ -156,16 +156,16 @@ def checking_status(algorithm: bool, item: List[Items]):
             else:
                 print(f"Put pack {items_guillotine[i].id}", end=" ")
             print(f"in bin {items_guillotine[i].pos_bin} that (x, y) is "
-                  f"({items_guillotine[i].corner_x + items_guillotine[i].width}, "
-                  f"{items_guillotine[i].corner_y + items_guillotine[i].height})")
+                  f"({items_guillotine[i].corner_x}, "
+                  f"{items_guillotine[i].corner_y})")
     else:
         for i in range(N_items):
             if item[i].rotated:
                 print(f"Rotate pack {item[i].id} and put", end=" ")
             else:
                 print(f"Put pack {item[i].id}", end=" ")
-            print(f"in bin {item[i].pos_bin} that the top right corner coordinate (x, y) is "
-                  f"({item[i].corner_x + item[i].width}, {item[i].corner_y + item[i].height})")
+            print(f"in bin {item[i].pos_bin} that the coordinate (x, y) is "
+                  f"({item[i].corner_x}, {item[i].corner_y})")
             
 
 # MAXIMAL RECTANGLES ALGORITHM
@@ -464,7 +464,7 @@ def enter():
     items = [Items() for _ in range(N_items)]
     for i in range(N_items):
         input_line = input().split()
-        items[i].width, items[i].height = int(input_line[1]), int(input_line[2])
+        items[i].width, items[i].height = int(input_line[0]), int(input_line[1])
         if items[i].width > items[i].height:
             rotate_item(items[i])
         items[i].area = items[i].width * items[i].height
