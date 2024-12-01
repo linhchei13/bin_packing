@@ -2,12 +2,13 @@ from itertools import chain, combinations
 import math
 from threading import Timer
 
-from pysat.formula import WCNF
+from pysat.formula import CNF
 from pysat.solvers import Solver
-from pysat.examples.rc2 import RC2
+
 import matplotlib.pyplot as plt
 import timeit
 from typing import List
+from pysat.solvers import Glucose3, Solver
 from prettytable import PrettyTable
 from threading import Timer
 import datetime
@@ -46,7 +47,7 @@ def BPP_result(rectangles, W, H, max_bins, n_items):
 # Define the variables
     height = H
     width = W
-    cnf = WCNF()
+    cnf = CNF()
     variables = {}
     counter = 1
 
@@ -74,6 +75,13 @@ def BPP_result(rectangles, W, H, max_bins, n_items):
     for i in range(len(rectangles)):
         variables[f"r{i + 1}"] = counter
         counter += 1
+
+    # Exactly one bin for each item
+    for i in range(n_items):
+        cnf.append([variables[f"x{i + 1},{j + 1}"] for j in range(max_bins)])
+        for j1 in range(max_bins):
+            for j2 in range(j1 + 1, max_bins):
+                cnf.append([-variables[f"x{i + 1},{j1 + 1}"], -variables[f"x{i + 1},{j2 + 1}"]])
 
     # Add the 2-literal axiom clauses
     for i in range(len(rectangles)):
@@ -231,25 +239,14 @@ def BPP_result(rectangles, W, H, max_bins, n_items):
             else:
                 cnf.append([-variables[f"r{i + 1}"],
                                 variables[f"py{i + 1},{height - rectangles[i][0]}"]])
-                
-    for i in range(n_items):
-        cnf.append([variables[f"x{i + 1},{j + 1}"] for j in range(max_bins)])
-        for j1 in range(max_bins):
-            for j2 in range(j1 + 1, max_bins):
-                cnf.append([-variables[f"x{i + 1},{j1 + 1}"], -variables[f"x{i + 1},{j2 + 1}"]])
-    
-    for i in range(n_items):
-        for j in range(max_bins):
-            cnf.append([variables[f"x{i + 1},{j + 1}"]], weight=1)
-
     start = timeit.default_timer()
-    with RC2(cnf) as rc2: #add all cnf to solver
-        model = rc2.compute()
-    
-        print("Cost: ", rc2.cost)
-        if model:
+    with Solver(name="mc") as solver: #add all cnf to solver
+        solver.append_formula(cnf)
+
+        if solver.solve():
             pos = [[0 for i in range(2)] for j in range(len(rectangles))]
             rotation = []
+            model = solver.get_model()
             print("SAT")
             result = {}
             bin_used = []
@@ -259,7 +256,6 @@ def BPP_result(rectangles, W, H, max_bins, n_items):
                     result[list(variables.keys())[list(variables.values()).index(var)]] = True
                 else:
                     result[list(variables.keys())[list(variables.values()).index(-var)]] = False
-            # print(result)
             for i in range(len(rectangles)):
                 rotation.append(result[f"r{i + 1}"])
                 for e in range(width - 1):
@@ -274,11 +270,11 @@ def BPP_result(rectangles, W, H, max_bins, n_items):
                         pos[i][1] = 0
             for i2 in range(max_bins):
                 bin_used.append([i for i in range(n_items) if result[f"x{i + 1},{i2 + 1}"] == True])
-            return(["sat", bin_used, pos, rotation, solver_time])
-        else:
-            return "unsat"
+            return(["sat", bin_used, pos, rotation, solver_time, len(variables), len(cnf.clauses)])
 
-        
+        else:
+            print("unsat")
+            return("unsat")
 def interrupt(solver):
     solver.interrupt()
   
@@ -286,13 +282,26 @@ def BPP(W, H, items, n_items, max_bins):
     items_area = [i[0] * i[1] for i in items]
     bin_area = W * H
     lower_bound = math.ceil(sum(items_area) / bin_area)
-    print(sum(items_area))
-    for k in range(lower_bound, max_bins):
-        print(f"Trying with {k} bins")
-        result = BPP_result(items, W, H, max_bins=k, n_items=n_items)
+    print(f"Lower bound: {lower_bound}")
+    left = lower_bound
+    right = max_bins
+    while left <= right:
+        mid = (right + left) // 2
+        print(f"Trying with {mid} bins")
+        result = BPP_result(items, W, H, max_bins=mid, n_items=n_items)
+        
         if result[0] == "sat":
-            print(f"Solution found with {k} bins")
-            return result[1:]
+            # Solution found, try with fewer bins
+            best_result = result[1:]
+            right = mid - 1
+            print(f"Solution found with {mid} bins, trying fewer bins...")
+        else:
+            # No solution, try with more bins
+            left = mid + 1
+            print(f"No solution with {mid} bins, trying more bins...")
+    
+    return best_result
+    
 	
 def print_solution(bpp_result):
     result_dict = {}
@@ -303,7 +312,9 @@ def print_solution(bpp_result):
         bins = bpp_result[0]
         pos = bpp_result[1]
         rotation = bpp_result[2]
-        
+        solver_time = bpp_result[3]
+        num_variables = bpp_result[4]
+        num_clauses = bpp_result[5]
         print(pos)
         print(rotation)
         for i in range(len(bins)):
@@ -314,7 +325,20 @@ def print_solution(bpp_result):
                 else:
                     print("Item", j + 1, items[j], "at position", pos[j])
             # display_solution((W, H), [items[j] for j in bins[i]], [pos[j] for j in bins[i]], [rotation[j] for j in bins[i]])
-    
+        print("--------------------")
+        print("Solution found with", len(bins), "bins")
+        print("Solver time:", solver_time)
+        print("Number of variables:", num_variables)
+        print("Number of clauses:", num_clauses)
+        result_dict = {
+            "Type": "not using OPP",
+            "Data": os.path.basename(sys.argv[1]),
+            "Number of items": n_items,
+            "Minimize Bin": len(bins),  
+            "Solver time": solver_time, 
+            "Number of variables": num_variables, 
+            "Number of clauses": num_clauses}
+    write_to_xlsx(result_dict)
 
 def write_to_xlsx(result_dict):
     # Append the result to a list
@@ -387,8 +411,6 @@ def solve():
 
         bpp_result = BPP(W, H, items, n_items, n_items)
         stop = time.time()
-        
-    
         print_solution(bpp_result)
         print("Time:", stop - start)
 

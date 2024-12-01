@@ -328,25 +328,23 @@ def BPP(W, H, items, n):
     items_area = [i[0] * i[1] for i in items]
     bin_area = W * H
     lower_bound = math.ceil(sum(items_area) / bin_area)
-
-    for k in range(lower_bound, n + 1):
-        print(f"Trying with {k} bins")
-        result = solve_sat_problem(items, k, W, H)
+    left = lower_bound
+    right = n
+    while left <= right:
+        mid = (right + left) // 2
+        print(f"Trying with {mid} bins")
+        result = solve_sat_problem(items, n_items=n_items, W=W, H=H)
         
         if result[0] == "sat":
-                print(f"Solution found with {k} bins")
-                position = result[1]
-                bins_used = [[i for i in range(n) if position[i][0] // W == j] for j in range(k)]
-                rotation = result[2]
-                solver_time = result[3]
-                num_variables = result[4]
-                num_clauses = result[5]
-                for j in range(k):
-                    for i in range(n):
-                        if position[i][0] // W == j:
-                            position[i][0] = position[i][0] - j * W
-                return bins_used, position, rotation, solver_time, num_variables, num_clauses
-        
+            # Solution found, try with fewer bins
+            best_result = result[1:]
+            right = mid - 1
+            print(f"Solution found with {mid} bins, trying fewer bins...")
+        else:
+            # No solution, try with more bins
+            left = mid + 1
+            print(f"No solution with {mid} bins, trying more bins...")
+    return best_result
 
 def write_to_xlsx(result_dict):
     # Append the result to a list
@@ -428,10 +426,14 @@ def solve():
         sys.stdin = f
         
         start = time.time()
+        
         read_input()
+        print(W, H)
+
         bpp_result = BPP(W, H, items, n_items)
         stop = time.time()
-
+        
+    
         print_solution(bpp_result)
         print("Time:", stop - start)
 
