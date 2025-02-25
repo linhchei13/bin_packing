@@ -15,7 +15,7 @@ def read_integers(filename):
     with open(filename) as f:
         return [int(elem) for elem in f.read().split()]
 
-file_name = "instances/t60_01.txt"
+file_name = "instances/t120_01.txt"
 
 # Read instance data
 file_it = iter(read_integers(file_name))
@@ -60,7 +60,7 @@ for k in range(nb_max_bins):
 
 
 # Minimize the number of used bins
-timeout = 60 # timeout in seconds
+timeout = 5 # timeout in seconds
 
 def interrupt(solver):
     solver.interrupt()

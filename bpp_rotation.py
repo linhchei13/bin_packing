@@ -5,14 +5,9 @@ from threading import Timer
 
 import pandas as pd
 from pysat.formula import CNF
-from pysat.solvers import Solver
-
 import matplotlib.pyplot as plt
-import timeit
 
-from typing import List
-from pysat.solvers import Glucose3, Solver
-from prettytable import PrettyTable
+from pysat.solvers import Glucose3
 from threading import Timer
 import datetime
 import pandas as pd
@@ -30,7 +25,8 @@ class TimeoutException(Exception): pass
 n_items = 0
 W, H = 0, 0
 items = []
-time_budget = 60
+time_out = 3000
+time_limit_solver = 500
 #read file
 def read_input():
     global W, H, items, n_items
@@ -75,7 +71,7 @@ def generate_all_clauses(rectangles, n, W, H):
     clauses = []
     variables = {}
     id_variables = 1
-
+    start = time.time()
     for i in range(len(rectangles)):
         for j in range(len(rectangles)):
             if i != j:
@@ -94,7 +90,7 @@ def generate_all_clauses(rectangles, n, W, H):
     for i in range(len(rectangles)):
         variables[f"r{i + 1}"] = id_variables
         id_variables += 1
-
+    
     # Add the 2-literal axiom clauses
     for i in range(len(rectangles)):
         for e in range(width - 1):  # -1 because we're using e+1 in the clause
@@ -225,7 +221,7 @@ def generate_all_clauses(rectangles, n, W, H):
                 non_overlapping(False, i, j, True, True, True, True)
                 non_overlapping(True, i, j, True, True, True, True)
 
-    # Domain encoding to ensure every rectangle stays inside strip's boundary
+    # # Domain encoding to ensure every rectangle stays inside strip's boundary
     for i in range(len(rectangles)):
             if rectangles[i][0] > width: #if rectangle[i]'s width larger than strip's width, it has to be rotated
                 clauses.append([variables[f"r{i + 1}"]])
@@ -250,7 +246,7 @@ def generate_all_clauses(rectangles, n, W, H):
             else:
                 clauses.append([-variables[f"r{i + 1}"],
                                 variables[f"py{i + 1},{height - rectangles[i][0]}"]])
-
+    
     for k in range(1, n):
          for i in range(len(rectangles)):
             # Not rotated
@@ -266,14 +262,15 @@ def generate_all_clauses(rectangles, n, W, H):
                         -variables[f"px{i + 1},{k * W - 1}"]])
             clauses.append([-variables[f"r{i + 1}"], -variables[f"px{i + 1},{k * W - w}"],
                         variables[f"px{i + 1},{k * W - 1}"]])
-            
+    stop = time.time()
+    print("Encoding Time:", format(stop-start, ".6f"))        
     return clauses, variables
 
-def solve_sat_problem(rectangles, n_items, W, H):
+def solve_bpp(rectangles, n_items, W, H):
     clauses, variables = generate_all_clauses(items, n_items, W, H)
     width = W * n_items
     height = H
-    solver = Solver(use_timer=True)
+    solver = Glucose3(use_timer=True)
     sat_status = False
     def interrupt(solver):
         solver.interrupt()
@@ -281,7 +278,7 @@ def solve_sat_problem(rectangles, n_items, W, H):
     for clause in clauses:
         solver.add_clause(clause)
     
-    timer = Timer(time_budget, interrupt, [solver])
+    timer = Timer(time_limit_solver, interrupt, [solver])
     timer.start()
     start = time.time()
     try: 
@@ -290,8 +287,8 @@ def solve_sat_problem(rectangles, n_items, W, H):
             pos = [[0 for i in range(2)] for j in range(len(rectangles))]
             rotation = []
             model = solver.get_model()
-            solver_time = format(time.time() - start, ".3f")
-            
+            solver_time = format(time.time() - start, ".6f")
+            print("Solver time:", solver_time)
             print("SAT")
             result = {}
             for var in model:
@@ -299,7 +296,7 @@ def solve_sat_problem(rectangles, n_items, W, H):
                     result[list(variables.keys())[list(variables.values()).index(var)]] = True
                 else:
                     result[list(variables.keys())[list(variables.values()).index(-var)]] = False
-
+            print("Decode")
             for i in range(len(rectangles)):
                 rotation.append(result[f"r{i + 1}"])
                 for e in range(width - 1):
@@ -326,12 +323,13 @@ def solve_sat_problem(rectangles, n_items, W, H):
     
 def BPP(W, H, items, n):
     items_area = [i[0] * i[1] for i in items]
+    print("Items area", sum(items_area))
     bin_area = W * H
     lower_bound = math.ceil(sum(items_area) / bin_area)
 
-    for k in range(lower_bound, n + 1):
+    for k in range(30, n + 1):
         print(f"Trying with {k} bins")
-        result = solve_sat_problem(items, k, W, H)
+        result = solve_bpp(items, k, W, H)
         
         if result[0] == "sat":
                 print(f"Solution found with {k} bins")
@@ -380,17 +378,37 @@ def write_to_xlsx(result_dict):
 
     print(f"Result added to Excel file: {os.path.abspath(excel_file_path)}\n")
 
-
+def export_to_xlsx(bpp_result, filepath, time):
+    result_dict = {}
+    if bpp_result is None:
+        result_dict = {
+            "Type": "Stacking-up based",
+            "Dataset": filepath.split("/")[-1],
+            "Number of items": n_items,
+            "Result": "UNSAT",
+            "Minimize Bin": "N/A",  
+            "Solver time": "-", 
+            "Real time": time,
+            "Number of variables": "-", 
+            "Number of clauses": "-"}
+    else:
+        bins, pos, rota, solver_time, num_variables, num_clauses = bpp_result
+        result_dict = {
+            "Type": "Stacking-up based",
+            "Dataset": filepath.split("/")[-1],
+            "Number of items": n_items,
+            "Minimize Bin": len(bins),  
+            "Solver time": solver_time, 
+            "Real time": time,
+            "Number of variables": num_variables, 
+            "Number of clauses": num_clauses}
+    write_to_xlsx(result_dict)
+    
 
 def print_solution(bpp_result):
-    result_dict = {}
-    if bpp_result == "timeout":
-        result_dict = {
-            "Number of items": n_items,
-            "Minimize Bin": "N/A",  
-            "Solver time": "Timeout", 
-            "Number of variables": "Timeout", 
-            "Number of clauses": "Timeout"}
+    
+    if bpp_result is None:
+        print("No solution found")
     else:
         bins, pos, rotation, solver_time, num_variables, num_clauses = bpp_result
         for i in range(len(bins)):
@@ -400,41 +418,27 @@ def print_solution(bpp_result):
                     print("Rotated item", j + 1, items[j], "at position", pos[j])
                 else:
                     print("Item", j + 1, items[j], "at position", pos[j])
-            # display_solution((W, H), [items[j] for j in bins[i]], [pos[j] for j in bins[i]], [rotation[j] for j in bins[i]])
+            display_solution((W, H), [items[j] for j in bins[i]], [pos[j] for j in bins[i]], [rotation[j] for j in bins[i]])
         print("--------------------")
         print("Solution found with", len(bins), "bins")
         print(f"Solver time: {solver_time} seconds")
         print("Number of variables:", num_variables)
         print("Number of clauses:", num_clauses)
-        result_dict = {
-            "Type": "using OPP",
-            "Dataset": os.path.basename(sys.argv[1]),
-            "Number of items": n_items,
-            "Minimize Bin": len(bins),  
-            "Solver time": solver_time, 
-            "Number of variables": num_variables, 
-            "Number of clauses": num_clauses}
-    write_to_xlsx(result_dict)
     
 
-def solve():
     # read input file
-    global W, H, items, n_items
-    if len(sys.argv) < 2:
-        print("Error: No file name provided.")
-        return
-    
-    with open(sys.argv[1], 'r') as f:
+
+if __name__ == "__main__": 
+    filepath = f"input_data/class/CL_100_04.txt"
+    with open(filepath, 'r') as f:
         sys.stdin = f
-        
-        start = time.time()
+        items = []
+        print(f"Reading file {filepath.split('/')[-1]}")
         read_input()
+        start = time.time()
         bpp_result = BPP(W, H, items, n_items)
         stop = time.time()
-
-        print_solution(bpp_result)
-        print("Time:", stop - start)
-
-if __name__ == "__main__":
-    solve()
+        print("Time:", format(stop-start, ".6f"))
+        export_to_xlsx(bpp_result, filepath, format(stop-start, ".6f"))
+    
 

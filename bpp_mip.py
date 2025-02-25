@@ -1,5 +1,14 @@
 from ortools.linear_solver import pywraplp
 import sys
+import pandas as pd
+import os
+import sys
+import time
+from openpyxl import load_workbook
+from openpyxl import Workbook
+from zipfile import BadZipFile
+from openpyxl.utils.dataframe import dataframe_to_rows
+from datetime import datetime 
 
 def input_data(file_path):
     data = {}
@@ -16,31 +25,42 @@ def input_data(file_path):
     
     return n,data,W,H
 
+def write_to_xlsx(result_dict):
+    # Append the result to a list
+    excel_results = []
+    excel_results.append(result_dict)
 
-if __name__ == '__main__':
-    try:
-        # Get input file path
-        file_path = sys.argv[1]
-    except IndexError:
-        # Default input file if file path is not specified
-        file_path = 'input_data/0015.txt'
-    
-    try:
-        # Get input file path
-        time_limit = int(sys.argv[2])
-    except IndexError:
-        # Default input file if file path is not specified
-        time_limit = 300
+    output_path = 'out/'
 
+    # Write the results to an Excel file
+    if not os.path.exists(output_path): os.makedirs(output_path)
+    df = pd.DataFrame(excel_results)
+    current_date = datetime.now().strftime('%Y-%m-%d')
+    excel_file_path = f"{output_path}/results_{current_date}.xlsx"
+
+    # Check if the file already exists
+    if os.path.exists(excel_file_path):
+        try:
+            book = load_workbook(excel_file_path)
+        except BadZipFile:
+            book = Workbook()  # Create a new workbook if the file is not a valid Excel file
+
+        # Check if the 'Results' sheet exists
+        if 'Results' not in book.sheetnames:
+            book.create_sheet('Results')  # Create 'Results' sheet if it doesn't exist
+
+        sheet = book['Results']
+        for row in dataframe_to_rows(df, index=False, header=False): sheet.append(row)
+        book.save(excel_file_path)
+
+    else: df.to_excel(excel_file_path, index=False, sheet_name='Results', header=False)
+
+    print(f"Result added to Excel file: {os.path.abspath(excel_file_path)}\n")
+def main_solver(file_path, time_limit):
     n,data,W,H = input_data(file_path)
     k = n
-    print(n, data, W, H)
-    # W_truck is the list of width of cars
-    # H_truck is the list of length of cars
-    # n is the number of item
-    # k is the number of car 
-
-    # Create solver
+    print('Number of items:',n)
+    print('Size of bin:',W,H)
     solver = pywraplp.Solver.CreateSolver('SCIP')
     
     # Create variables
@@ -127,7 +147,8 @@ if __name__ == '__main__':
 
     status = solver.Solve()
     print(status)
-    if status == pywraplp.Solver.OPTIMAL or status == pywraplp.Solver.FEASIBLE:
+    result_dict = {}
+    if solver.Solve() == pywraplp.Solver.OPTIMAL or solver.Solve() == pywraplp.Solver.FEASIBLE:
         print('--------------Solution Found--------------')
         for i in range(n):
             print(f'put item {i+1} with rotation {int(Ro[i].solution_value())}', end=' ') 
@@ -143,6 +164,35 @@ if __name__ == '__main__':
             print('Status              : FEASIBLE')
         print(f'Time limit          : {time_limit}')
         print(f'Running time        : {solver.WallTime() / 1000}')
+        return n, int(sum(z[m].solution_value() for m in range(k))), format(solver.WallTime() / 1000, '.6f')
+    else:
+        print('NO SOLUTIONS')
+        return n, '-', format(solver.WallTime() / 1000, '.6f')
     
+if __name__ == '__main__':
+    try:
+        # Get input file path
+        time_limit = int(sys.argv[2])
+    except IndexError:
+        time_limit = 600
+       
+    # Create solver
+    
+    file_path = f'input_data/BENG/BENG05.txt'
+    print("Reading file: ", file_path.split("/")[-1])
+    start = time.time()
+    n, n_bins, solver_time = main_solver(file_path, time_limit)
+    stop = time.time()
+    result_dict = {
+        "Type": "Ortools MIP",
+        "Data": file_path.split("/")[-1],
+        "Number of items": n,
+        "Bins": n_bins,  
+        "Solver time": solver_time,
+        "Real time": format(stop - start, '.6f')
+    }
+    write_to_xlsx(result_dict)
+    
+
 
 

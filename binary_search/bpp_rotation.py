@@ -405,7 +405,7 @@ def print_solution(bpp_result):
         print("Number of variables:", num_variables)
         print("Number of clauses:", num_clauses)
         result_dict = {
-            "Type": "using OPP",
+            "Type": "BPP1",
             "Dataset": os.path.basename(sys.argv[1]),
             "Number of items": n_items,
             "Minimize Bin": len(bins),  
