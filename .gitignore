@@ -1,11 +1,7 @@
 /CLASS
 /BENG
-/instances
 /binary_search
-/input_data/BW
-/input_data/MV
 data_change.py
 e.py
-/input_data/all
-/input_data/CLASS/New folder
-/bppcplex
+*.json
+/out

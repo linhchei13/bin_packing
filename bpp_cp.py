@@ -9,6 +9,32 @@ from openpyxl import Workbook
 from zipfile import BadZipFile
 from openpyxl.utils.dataframe import dataframe_to_rows
 from datetime import datetime
+import fileinput
+import json
+n_items = 0
+W, H = 0, 0
+upper_bound = 0
+rectangles = []
+variables_length = 0
+clauses_length = 0
+best_bins = 0
+best_pos = []
+best_rot = []
+optimal_bins = 0
+optimal_pos = []
+optimal_rot = []
+time_out = 200  
+instance_name = ""
+
+#read file
+def read_file(file_path):
+    global instance_name
+    instance_name = file_path.split("/")[-1].split(".")[0]  # Lấy tên file không có phần mở rộng
+    s = ""
+    for line in fileinput.input(files=file_path):
+        s += line
+    return s.splitlines()
+
 def read_input(file_path):
     with open(file_path) as f:
         data = f.readlines()
@@ -53,7 +79,7 @@ def write_to_xlsx(result_dict):
 
     print(f"Result added to Excel file: {os.path.abspath(excel_file_path)}\n")
     
-def main_solver(file_path, time_limit):
+def BPP_CP(file_path, time_limit):
     n_items, n_bins, items, W, H = read_input(file_path)
     max_pack_width = max(x[0] for x in items)
     max_pack_height = max(x[1] for x in items)
@@ -95,9 +121,6 @@ def main_solver(file_path, time_limit):
         model.Add(width[i] == items[i][1]).OnlyEnforceIf(R[i])
         model.Add(height[i] == items[i][1]).OnlyEnforceIf(R[i].Not())
         model.Add(height[i] == items[i][0]).OnlyEnforceIf(R[i])
-
-
-
     # 
     # Constraint
     # 
@@ -185,7 +208,7 @@ def main_solver(file_path, time_limit):
 
         print('NO SOLUTIONS')
         result_dict = {
-            "Type": "Ortools CP",
+            "Type": "OR-Tools CP",
             "Data": file_path.split("/")[-1],
             "Number of items": n_items,
             "Bins": '-',  
@@ -211,7 +234,7 @@ if __name__ == "__main__":
     for i in range(10, 11):
         file_path = f'CLASS\class_01_1.txt'
         print("Reading file: ", file_path.split("/")[-1])
-        main_solver(file_path, time_limit)
+        BPP_CP(file_path, time_limit)
     
         
     

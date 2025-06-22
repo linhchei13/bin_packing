@@ -422,27 +422,25 @@ def main_solver(file_path, time_limit):
     model.write('model_cplex.lp')
     # Solve the model
     print('--------------Solving--------------')
+    start = time.time()
     model.solve()
+    stop = time.time()
+    print("Solving time: ", stop - start, model.get_time())
     print('--------------Solved--------------')
     status = model.solution.get_status()
     
     # Get solution status
-    solve_time = model.get_time()/1000
-    for j in range(k):
-        print(f"Z{j}",model.solution.get_values(f'z[{j}]'))
-        for i in range(n):
-            print(f"X{i},{j}",model.solution.get_values(f'x[{i},{j}]'))
-
+    solve_time = stop - start
     bins = []
     for j in range(k):
         bins.append([i for i in range(n) if model.solution.get_values(f'x[{i},{j}]') > 0.5])
     
-    rot = []
-    pos = []
+    rot = [model.solution.get_values(f'Ro[{i}]') for i in range(n)]
+    pos = [[model. solution.get_values(f'l[{i}]'), model.solution.get_values(f'b[{i}]')] for i in range(n)]
     
     global result_dict
     result_dict = {
-        "Type": "CPLEX",
+        "Type": "CPLEX MIP",
         'Problem': file_path.split("/")[-1],
         "Number of items": n,
         "Width": W,
@@ -455,15 +453,6 @@ def main_solver(file_path, time_limit):
     if status in [model.solution.status.optimal, model.solution.status.MIP_optimal,
                   model.solution.status.feasible, model.solution.status.MIP_feasible]:
         print('--------------Solution Found--------------')
-        for i in range(n):
-            print('Item', i+1, 'Rotation:', int(model.solution.get_values(f'Ro[{i}]')),
-                  "size:", data['size_item'][i],
-                  'Position:', [model.solution.get_values(f"l[{i}]"), model.solution.get_values(f"b[{i}]")],
-                  "Top-Right:", [model.solution.get_values(f"r[{i}]"), model.solution.get_values(f"t[{i}]")])
-            ro_val = int(model.solution.get_values(f'Ro[{i}]'))
-            rot.append(ro_val)
-            pos.append((model.solution.get_values(f"l[{i}]"), model.solution.get_values(f"b[{i}]")))
-        
         for j in range(k):
             if model.solution.get_values(f'z[{j}]') > 0.5:
                 print(f"Bin {j+1}:")
@@ -472,8 +461,8 @@ def main_solver(file_path, time_limit):
                         print(f'  Put item {i+1} {data["size_item"][i]} with rotation {rot[i]} at ({pos[i][0]},{pos[i][1]})')
                 print("-------")
                 # Uncomment to display solution
-                display_solution((W, H), [data['size_item'][i] for i in bins[j]],
-                               [pos[i] for i in bins[j]], [rot[i] for i in bins[j]])
+                # display_solution((W, H), [data['size_item'][i] for i in bins[j]],
+                #                [pos[i] for i in bins[j]], [rot[i] for i in bins[j]])
         
         bin_used = sum(model.solution.get_values(f'z[{m}]') for m in range(k))
         result_dict["Number of bins"] = int(bin_used)
@@ -481,23 +470,26 @@ def main_solver(file_path, time_limit):
         print('----------------Statistics----------------')
         
         if status in [model.solution.status.optimal, model.solution.status.MIP_optimal]:
-            result_dict["Result"] = "OPTIMAL"
+            result_dict["Result"] = "SAT"
             print('Status: OPTIMAL')
         else:
-            result_dict["Result"] = "FEASIBLE"
+            result_dict["Result"] = "SAT"
             print('Status: FEASIBLE')
             
         print(f'Time limit: {time_limit}')
         print(f'Running time: {solve_time}')               
         return n, int(bin_used), format(solve_time, '.6f')
-    else:
+    elif status == model.solution.status.infeasible:
         result_dict["Result"] = "UNSAT"
+        return n, '-', format(solve_time, '.6f')
+    else:
+        result_dict["Result"] = "TIMEOUT"
         print('NO SOLUTIONS')
         return n, '-', format(solve_time, '.6f')
 
 
 if __name__ == '__main__':
-    
+    for i in range(1, 6):
         try:
             # Get time limit
             time_limit = int(sys.argv[1]) if len(sys.argv) > 1 else 600
@@ -505,7 +497,7 @@ if __name__ == '__main__':
             time_limit = 600
            
         # Create solver
-        file_path = f'input_data/class/cl_020_02.txt'
+        file_path = f'input_data/class/cl_040_{i}.txt'
         print("Reading file: ", file_path.split("/")[-1])
         start = time.time()
         n, n_bins, solver_time = main_solver(file_path, time_limit)

@@ -215,7 +215,11 @@ def OPP(rectangles, n, W, H):
     timer.start()
     try:
         sat_status = solver.solve_limited(expect_interrupt=True)
-        if sat_status:
+        if sat_status == None:
+            print("Timeout")
+            timer.cancel()
+            return "timeout", None, None, len(variables), len(cnf.clauses)
+        elif sat_status == True:
             pos = [[0 for i in range(2)] for j in range(len(rectangles))]
             model = solver.get_model()
             print("SAT")
@@ -244,6 +248,7 @@ def OPP(rectangles, n, W, H):
 
         else:
             timer.cancel()
+            print("UNSAT")
             return("unsat")
     except:
         timer.cancel()
@@ -253,12 +258,13 @@ def BPP(W, H, items, n):
     items_area = [i[0] * i[1] for i in items]
     bin_area = W * H
     lower_bound = math.ceil(sum(items_area) / bin_area)
-    for k in range(30, n + 1):
+    for k in range(lower_bound, n + 1):
         print("Trying with", k, "bins")
         result = OPP(items, k, W, H)
         if result[0] == "sat":
             print("Solution found with", k, "bins")
             position = result[1]
+
             bins_used = [[i for i in range(n) if position[i][0] // W == j] for j in range(k)]
             for j in range(k):
                 for i in range(n):
@@ -267,14 +273,17 @@ def BPP(W, H, items, n):
             return[bins_used, position,  result[2], result[3], result[4]]
         
 def print_solution(bpp_result):
+    if bpp_result is None:
+        print("No solution found or timeout occurred.")
+        return
+        
     bins_used = bpp_result[0]
     position = bpp_result[1]
     for i in range(len(bins_used)):
         print("Bin", i + 1, "contains items", [(j + 1) for j in bins_used[i]])
         for j in bins_used[i]:
             print("Item", j + 1, items[j], "at position", position[j])
-        display_solution((W, H), [items[j] for j in bins_used[i]], [position[j] for j in bins_used[i]])
-
+        # display_solution((W, H), [items[j] for j in bins_used[i]], [position[j] for j in bins_used[i]])
 def write_to_xlsx(result_dict):
     # Append the result to a list
     excel_results = []
@@ -349,7 +358,7 @@ def interrupt():
 if __name__ == '__main__':
     # timer = Timer(600, interrupt)
     # timer.start()
-    filepath = f"input_data/class/CL_100_04.txt"
+    filepath = f"inputs/class/CL_1_20_1.txt"
     print(f"Processing file: {filepath}")
     input = read_file_instance(filepath)
     n = int(input[0])
@@ -361,6 +370,7 @@ if __name__ == '__main__':
     bpp_result = BPP(W, H, items, n)
     
     stop = time.time()
-    export_to_xlsx(bpp_result, filepath, format(stop - start, '.6f'))
+    export_to_xlsx(bpp_result, filepath, format(stop - start, '.3f'))
     print("Solver", format(stop - start, '.6f'))
+    print(bpp_result)
     print_solution(bpp_result)

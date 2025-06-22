@@ -10,6 +10,14 @@ from zipfile import BadZipFile
 from openpyxl.utils.dataframe import dataframe_to_rows
 from datetime import datetime 
 from matplotlib import pyplot as plt
+import fileinput
+
+def read_file(file_path):
+    s = ""
+    for line in fileinput.input(files=file_path):
+        s += line
+    return s.splitlines()
+
 W, H = 0, 0
 global result_dict
 result_dict = {}
@@ -89,7 +97,18 @@ def main_solver(file_path, time_limit):
     k = n
     print('Number of items:',n)
     print('Size of bin:',W,H)
-    
+     
+    global result_dict 
+    result_dict = {
+        "Type": "Gurobi",
+        'Problem': file_path.split("/")[-1],
+        "Number of items": n,
+        "Width": W,
+        "Height": H,
+        "Number of bins": 0,
+        "Time": 0,
+        "Result": "SAT",
+        }
     # Create Gurobi model
     model = Model("BinPacking")
     
@@ -177,9 +196,16 @@ def main_solver(file_path, time_limit):
     
     # Solve the model
     start_time = time.time()
-    model.optimize()
+    try: 
+        model.optimize()
+    except Exception as e:
+        print(e)
+        result_dict["Result"] = "MO"
+        print("MO")
+        return n, '-', format(time.time() - start_time, '.6f')
     
     solve_time = time.time() - start_time
+    result_dict["Time"] = format(solve_time, '.6f')
     model.write('model_gurobi.lp')
     bins = []
     for j in range(k):
@@ -188,18 +214,7 @@ def main_solver(file_path, time_limit):
     pos = [(l[i].X, b[i].X) for i in range(n)]
     print(bins)
     print()
-    
-    global result_dict 
-    result_dict = {
-        "Type": "Gurobi",
-        'Problem': file_path.split("/")[-1],
-        "Number of items": n,
-        "Width": W,
-        "Height": H,
-        "Number of bins": 0,
-        "Time": format(solve_time, '.6f'),
-        "Result": "SAT",
-        }
+   
     print(model.Status)
     if model.Status == GRB.OPTIMAL or model.Status == GRB.TIME_LIMIT:
         print('--------------Solution Found--------------')
@@ -238,21 +253,21 @@ def main_solver(file_path, time_limit):
         return n, '-', format(solve_time, '.6f')
 
 
-if __name__ == '__main__':
+for i in range(1, 10):
     try:
         # Get input file path
         time_limit = int(sys.argv[2])
     except IndexError:
-        time_limit = 600
+        time_limit = 300
        
     # Create solver
     
-    file_path = f'input_data/class/cl_020_02.txt'
+    file_path = f'input_data/test.txt'
     print("Reading file: ", file_path.split("/")[-1])
     start = time.time()
     n, n_bins, solver_time = main_solver(file_path, time_limit)
     stop = time.time()
-    
+
     write_to_xlsx(result_dict)
 
 

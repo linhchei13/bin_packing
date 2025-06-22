@@ -9,7 +9,7 @@ from openpyxl import Workbook
 from zipfile import BadZipFile
 from openpyxl.utils.dataframe import dataframe_to_rows
 from datetime import datetime 
-
+from matplotlib import pyplot as plt
 def input_data(file_path):
     data = {}
     f = open(file_path,'r')
@@ -24,6 +24,30 @@ def input_data(file_path):
         data['size_item'].append([int(line[0]),int(line[1])])
     
     return n,data,W,H
+
+def display_solution(strip, rectangles, pos_circuits, rotation):
+    # define Matplotlib figure and axis
+    fig, ax = plt.subplots()
+    ax = plt.gca()
+    plt.title(strip)
+
+    if len(pos_circuits) > 0:
+        for i in range(len(rectangles)):
+            rect = plt.Rectangle(pos_circuits[i],
+                                 rectangles[i][0] if not rotation[i] else rectangles[i][1],
+                                 rectangles[i][1] if not rotation[i] else rectangles[i][0],
+                                 edgecolor="#333")
+            ax.add_patch(rect)
+
+    ax.set_xlim(0, strip[0])
+    ax.set_ylim(0, strip[1] + 1)
+    ax.set_xticks(range(strip[0] + 1))
+    ax.set_yticks(range(strip[1] + 1))
+    ax.set_xlabel('width')
+    ax.set_ylabel('height')
+    # display plot
+    plt.show()
+
 
 def write_to_xlsx(result_dict):
     # Append the result to a list
@@ -146,7 +170,12 @@ def main_solver(file_path, time_limit):
     solver.set_time_limit(time_limit * 1000)
 
     status = solver.Solve()
-    print(status)
+    bins = []
+    for j in range(k):
+        bins.append([i for i in range(n) if x[i,j].solution_value() ==1])
+    rotation = [Ro[i].solution_value() for i in range(n)]
+    pos = [(l[i].solution_value(), b[i].solution_value()) for i in range(n)]
+    print(bins)
     result_dict = {}
     if solver.Solve() == pywraplp.Solver.OPTIMAL or solver.Solve() == pywraplp.Solver.FEASIBLE:
         print('--------------Solution Found--------------')
@@ -155,6 +184,7 @@ def main_solver(file_path, time_limit):
             for j in range(k):
                 if x[i,j].solution_value() ==1:
                     print(f'in bin {j+1}', end=' ')
+            
             print(f'at ({l[i].solution_value()},{b[i].solution_value()})')
         print(f'Number of bin used  :',int(sum(z[m].solution_value() for m in range(k))))
         print('----------------Statistics----------------')
@@ -164,6 +194,9 @@ def main_solver(file_path, time_limit):
             print('Status              : FEASIBLE')
         print(f'Time limit          : {time_limit}')
         print(f'Running time        : {solver.WallTime() / 1000}')
+        for m in range(k):
+            if z[m].solution_value() == 1:
+                display_solution([W,H], [data['size_item'][i] for i in bins[m]], [pos[i] for i in bins[m]], [rotation[i] for i in bins[m]])
         return n, int(sum(z[m].solution_value() for m in range(k))), format(solver.WallTime() / 1000, '.6f')
     else:
         print('NO SOLUTIONS')
@@ -174,17 +207,17 @@ if __name__ == '__main__':
         # Get input file path
         time_limit = int(sys.argv[2])
     except IndexError:
-        time_limit = 600
+        time_limit = 100
        
     # Create solver
     
-    file_path = f'input_data/BENG/BENG05.txt'
+    file_path = f'input_data/BENG/BENG01.txt'
     print("Reading file: ", file_path.split("/")[-1])
     start = time.time()
     n, n_bins, solver_time = main_solver(file_path, time_limit)
     stop = time.time()
     result_dict = {
-        "Type": "Ortools MIP",
+        "Type": "OR-Tools MIP",
         "Data": file_path.split("/")[-1],
         "Number of items": n,
         "Bins": n_bins,  

@@ -1,14 +1,16 @@
+import fileinput
 from itertools import chain, combinations
 import math
 import os
+import signal
 from threading import Timer
+import threading
 
 import pandas as pd
 from pysat.formula import CNF
 import matplotlib.pyplot as plt
 
 from pysat.solvers import Glucose3
-from threading import Timer
 import datetime
 import pandas as pd
 import os
@@ -19,27 +21,43 @@ from openpyxl import Workbook
 from zipfile import BadZipFile
 from openpyxl.utils.dataframe import dataframe_to_rows
 from datetime import datetime
+import json
+import timeit
 
 class TimeoutException(Exception): pass
-# Initialize the CNF formula
+
+# Global variables
 n_items = 0
 W, H = 0, 0
-items = []
-time_out = 3000
-time_limit_solver = 500
-#read file
-def read_input():
-    global W, H, items, n_items
-    n_items = int(input().split()[0])
-    W, H = map(int, input().split())
-    for i in range(n_items):
-        list = input().split() 
-        items.append([int(list[0]), int(list[1])])
+upper_bound = 0
+rectangles = []
+variables_length = 0
+clauses_length = 0
+
+optimal_bins = 0
+best_bins = 0
+optimal_pos = []
+optimal_rot = []
+time_out = 200  
+instance_name = ""
+is_timeout = False
+
+start = timeit.default_timer()
+def read_file(file_path):
+    global instance_name
+    instance_name = file_path.split("/")[-1].split(".")[0]  # Lấy tên file không có phần mở rộng
+    s = ""
+    for line in fileinput.input(files=file_path):
+        s += line
+    return s.splitlines()
 
 def positive_range(end):
     if (end < 0):
         return []
     return range(end)
+def interupt(solver):
+    print("Timeout")
+    solver.interrupt()
 
 def display_solution(strip, rectangles, pos_circuits, rotation):
     # define Matplotlib figure and axis
@@ -64,10 +82,25 @@ def display_solution(strip, rectangles, pos_circuits, rotation):
     # display plot
     plt.show()
 
-def generate_all_clauses(rectangles, n, W, H):
-# Define the variables
-    height = H
-    width = n * W
+def save_checkpoint(instance, variables, clauses, bins, status="IN_PROGRESS"):
+    checkpoint = {
+        'Variables': variables,
+        'Clauses': clauses,
+        'Runtime':  timeit.default_timer() - start,
+        'Optimal_Bins': bins if bins != float('inf') else upper_bound,
+        'Status': status
+    }
+    
+    # Ghi ra file checkpoint
+    with open(f'checkpoint_{instance}.json', 'w') as f:
+        json.dump(checkpoint, f)
+
+def OPP(n_bins, W, H):
+    # Define the variables
+    global variables_length, clauses_length, best_bins, optimal_bins, optimal_pos, optimal_rot
+    global upper_bound, is_timeout
+    height = n_bins * H
+    width = W
     clauses = []
     variables = {}
     id_variables = 1
@@ -140,7 +173,7 @@ def generate_all_clauses(rectangles, n, W, H):
         clauses.append(four_literal + [i_rotation])
         clauses.append(four_literal + [j_rotation])
 
-        # ¬lri, j ∨ ¬pxj, e
+        #¬lri, j ∨ ¬pxj, e
         if h1 and not i_square:
             for e in range(min(width, i_width)):
                     clauses.append([i_rotation,
@@ -158,7 +191,7 @@ def generate_all_clauses(rectangles, n, W, H):
                     clauses.append([i_rotation,
                                 -variables[f"ud{i + 1},{j + 1}"],
                                 -variables[f"py{j + 1},{f}"]])
-        # ¬udj, i ∨ ¬pyi, f,
+        #¬udj, i ∨ ¬pyi, f,
         if v2 and not j_square:
             for f in range(min(height, j_height)):
                     clauses.append([j_rotation,
@@ -247,198 +280,187 @@ def generate_all_clauses(rectangles, n, W, H):
                 clauses.append([-variables[f"r{i + 1}"],
                                 variables[f"py{i + 1},{height - rectangles[i][0]}"]])
     
-    for k in range(1, n):
+    for k in range(1, n_bins):
          for i in range(len(rectangles)):
             # Not rotated
-            w = rectangles[i][0]
-            clauses.append([variables[f"r{i + 1}"], variables[f"px{i + 1},{k * W - w}"],
-                        -variables[f"px{i + 1},{k * W - 1}"]])
-            clauses.append([variables[f"r{i + 1}"], -variables[f"px{i + 1},{k * W - w}"],
-                        variables[f"px{i + 1},{k * W - 1}"]])
+            h = rectangles[i][1]
+            clauses.append([variables[f"r{i + 1}"], variables[f"py{i + 1},{k * H - h}"],
+                        -variables[f"py{i + 1},{k * H - 1}"]])
+            clauses.append([variables[f"r{i + 1}"], -variables[f"py{i + 1},{k * H - h}"],
+                        variables[f"py{i + 1},{k * H - 1}"]])
             
             # Rotated
-            w = rectangles[i][1]
-            clauses.append([-variables[f"r{i + 1}"], variables[f"px{i + 1},{k * W - w}"],
-                        -variables[f"px{i + 1},{k * W - 1}"]])
-            clauses.append([-variables[f"r{i + 1}"], -variables[f"px{i + 1},{k * W - w}"],
-                        variables[f"px{i + 1},{k * W - 1}"]])
+            h = rectangles[i][0]
+            clauses.append([-variables[f"r{i + 1}"], variables[f"py{i + 1},{k * H - h}"],
+                        -variables[f"py{i + 1},{k * H - 1}"]])
+            clauses.append([-variables[f"r{i + 1}"], -variables[f"py{i + 1},{k * H - h}"],
+                        variables[f"py{i + 1},{k * H - 1}"]])
     stop = time.time()
-    print("Encoding Time:", format(stop-start, ".6f"))        
-    return clauses, variables
+    print("Encoding Time:", format(stop-start, ".6f"))  
+    variables_length = len(variables)
+    clauses_length = len(clauses)
+    save_checkpoint(instance_name, variables_length, clauses_length, best_bins, "IN_PROGRESS")      
+    with Glucose3(use_timer=True) as solver:
+        # Add the clauses to the solver
+        for clause in clauses:
+            solver.add_clause(clause)
+        timer = Timer(time_out, interupt, [solver])
+        timer.start()    
 
-def solve_bpp(rectangles, n_items, W, H):
-    clauses, variables = generate_all_clauses(items, n_items, W, H)
-    width = W * n_items
-    height = H
-    solver = Glucose3(use_timer=True)
-    sat_status = False
-    def interrupt(solver):
-        solver.interrupt()
-        
-    for clause in clauses:
-        solver.add_clause(clause)
-    
-    timer = Timer(time_limit_solver, interrupt, [solver])
-    timer.start()
-    start = time.time()
-    try: 
-        sat_status = solver.solve_limited(expect_interrupt=True)
-        if sat_status:
-            pos = [[0 for i in range(2)] for j in range(len(rectangles))]
-            rotation = []
-            model = solver.get_model()
-            solver_time = format(time.time() - start, ".6f")
-            print("Solver time:", solver_time)
-            print("SAT")
-            result = {}
-            for var in model:
-                if var > 0:
-                    result[list(variables.keys())[list(variables.values()).index(var)]] = True
-                else:
-                    result[list(variables.keys())[list(variables.values()).index(-var)]] = False
-            print("Decode")
-            for i in range(len(rectangles)):
-                rotation.append(result[f"r{i + 1}"])
-                for e in range(width - 1):
-                    if result[f"px{i + 1},{e}"] == False and result[f"px{i + 1},{e + 1}"] == True:
-                        pos[i][0] = e + 1
-                    if e == 0 and result[f"px{i + 1},{e}"] == True:
-                        pos[i][0] = 0
-                for f in range(height - 1):
-                    if result[f"py{i + 1},{f}"] == False and result[f"py{i + 1},{f + 1}"] == True:
-                        pos[i][1] = f + 1
-                    if f == 0 and result[f"py{i + 1},{f}"] == True:
-                        pos[i][1] = 0  
-            timer.cancel()
-            return "sat", pos, rotation, solver_time, len(variables), len(clauses)
-
-        else:
-            timer.cancel()
-            print("unsat")
-            return("unsat")
-    except TimeoutException:
-        print("Timeout")
-        return("timeout")
-    
-    
-def BPP(W, H, items, n):
-    items_area = [i[0] * i[1] for i in items]
-    print("Items area", sum(items_area))
-    bin_area = W * H
-    lower_bound = math.ceil(sum(items_area) / bin_area)
-
-    for k in range(30, n + 1):
-        print(f"Trying with {k} bins")
-        result = solve_bpp(items, k, W, H)
-        
-        if result[0] == "sat":
-                print(f"Solution found with {k} bins")
-                position = result[1]
-                bins_used = [[i for i in range(n) if position[i][0] // W == j] for j in range(k)]
-                rotation = result[2]
-                solver_time = result[3]
-                num_variables = result[4]
-                num_clauses = result[5]
-                for j in range(k):
-                    for i in range(n):
-                        if position[i][0] // W == j:
-                            position[i][0] = position[i][0] - j * W
-                return bins_used, position, rotation, solver_time, num_variables, num_clauses
-        
-
-def write_to_xlsx(result_dict):
-    # Append the result to a list
-    excel_results = []
-    excel_results.append(result_dict)
-
-    output_path = 'out/'
-
-    # Write the results to an Excel file
-    if not os.path.exists(output_path): os.makedirs(output_path)
-    df = pd.DataFrame(excel_results)
-    current_date = datetime.now().strftime('%Y-%m-%d')
-    excel_file_path = f"{output_path}/results_{current_date}.xlsx"
-
-    # Check if the file already exists
-    if os.path.exists(excel_file_path):
+        # Solve with timeout check
         try:
-            book = load_workbook(excel_file_path)
-        except BadZipFile:
-            book = Workbook()  # Create a new workbook if the file is not a valid Excel file
+            if solver.solve_limited(expect_interrupt=True):
+                # Rest of your solver success code...
+                pos = [[0 for i in range(2)] for j in range(len(rectangles))]
+                rotation = []
+                model = solver.get_model()
+                solver_time = format(time.time() - start, ".3f")
+                print("Solver time:", solver_time)
+                print("SAT")
+                if n_bins < best_bins:
+                    best_bins = n_bins
+                    print(f"New best bins found: {best_bins}")
+                    save_checkpoint(instance_name, variables_length, clauses_length, best_bins)
+                result = {}
+                for var in model:
+                    if var > 0:
+                        result[list(variables.keys())[list(variables.values()).index(var)]] = True
+                    else:
+                        result[list(variables.keys())[list(variables.values()).index(-var)]] = False
 
-        # Check if the 'Results' sheet exists
-        if 'Results' not in book.sheetnames:
-            book.create_sheet('Results')  # Create 'Results' sheet if it doesn't exist
+                for i in range(len(rectangles)):
+                    rotation.append(result[f"r{i + 1}"])
+                    for e in range(width - 1):
+                        if result[f"px{i + 1},{e}"] == False and result[f"px{i + 1},{e + 1}"] == True:
+                            pos[i][0] = e + 1
+                        if e == 0 and result[f"px{i + 1},{e}"] == True:
+                            pos[i][0] = 0
+                    for f in range(height - 1):
+                        if result[f"py{i + 1},{f}"] == False and result[f"py{i + 1},{f + 1}"] == True:
+                            pos[i][1] = f + 1
+                        if f == 0 and result[f"py{i + 1},{f}"] == True:
+                            pos[i][1] = 0  
+                timer.cancel()  # Cancel the timer if we complete normally
+                return ["sat", pos, rotation]
+        except:
+            timer.cancel()
+            raise
+            
+def BPP_linear_search(lower, upper):
+    global optimal_bins, optimal_pos, optimal_rot
+    for n in range(lower, upper + 1):
+        print(f"Trying with {n} bins")
+        result = OPP(n, W, H)
+        if result[0] == "sat":
+                optimal_bins = n
+                print(f"New best bins found: {best_bins}")
+                optimal_pos = result[1]
+                optimal_rot = result[2]
+                print(f"Optimal positions before: {optimal_pos}")
+                for i in range(len(optimal_pos)):
+                    optimal_pos[i].append(optimal_pos[i][1] // H) # append the bin number
+                    optimal_pos[i][1] = optimal_pos[i][1] % H
+                return
+        else:
+            print(f"Found solution with {n} bins, but not better than current best {best_bins}")
+   
 
-        sheet = book['Results']
-        for row in dataframe_to_rows(df, index=False, header=False): sheet.append(row)
-        book.save(excel_file_path)
-
-    else: df.to_excel(excel_file_path, index=False, sheet_name='Results', header=False)
-
-    print(f"Result added to Excel file: {os.path.abspath(excel_file_path)}\n")
-
-def export_to_xlsx(bpp_result, filepath, time):
-    result_dict = {}
-    if bpp_result is None:
-        result_dict = {
-            "Type": "Stacking-up based",
-            "Dataset": filepath.split("/")[-1],
-            "Number of items": n_items,
-            "Result": "UNSAT",
-            "Minimize Bin": "N/A",  
-            "Solver time": "-", 
-            "Real time": time,
-            "Number of variables": "-", 
-            "Number of clauses": "-"}
-    else:
-        bins, pos, rota, solver_time, num_variables, num_clauses = bpp_result
-        result_dict = {
-            "Type": "Stacking-up based",
-            "Dataset": filepath.split("/")[-1],
-            "Number of items": n_items,
-            "Minimize Bin": len(bins),  
-            "Solver time": solver_time, 
-            "Real time": time,
-            "Number of variables": num_variables, 
-            "Number of clauses": num_clauses}
-    write_to_xlsx(result_dict)
+# Modify the BPP_binary_search function to check timeout
+def BPP_binary_search(lower, upper):
+    global is_timeout
     
-
-def print_solution(bpp_result):
-    
-    if bpp_result is None:
-        print("No solution found")
-    else:
-        bins, pos, rotation, solver_time, num_variables, num_clauses = bpp_result
-        for i in range(len(bins)):
-            print("Bin", i + 1, "contains items", [(j + 1) for j in bins[i]])
-            for j in bins[i]:
-                if rotation[j]:
-                    print("Rotated item", j + 1, items[j], "at position", pos[j])
+    # Check timeout at the beginning
+    if is_timeout or timeit.default_timer() - start > time_out:
+        timeout_handler()
+        
+    if (lower <= upper):
+        mid = (lower + upper) // 2
+        print(f"Trying with {mid} bins")
+        result = OPP(mid, W, H) 
+        # Rest of the function stays the same
+        if result[0] == "unsat":
+            if lower == upper:
+                return -1
+            else:
+                return BPP_binary_search(mid + 1, upper)
+        else:
+            if mid == lower:
+                print(f"Optimal solution found with {mid} bins")
+                global optimal_bins, optimal_pos, optimal_rot
+                optimal_bins = mid
+                optimal_pos = result[1]
+                print(f"Optimal positions before: {optimal_pos}")
+                optimal_rot = result[2]
+                for i in range(len(optimal_pos)):
+                    optimal_pos[i].append(optimal_pos[i][1] // H) # append the bin number
+                    optimal_pos[i][1] = optimal_pos[i][1] % H
+                if lower == upper:
+                    return -1
                 else:
-                    print("Item", j + 1, items[j], "at position", pos[j])
-            display_solution((W, H), [items[j] for j in bins[i]], [pos[j] for j in bins[i]], [rotation[j] for j in bins[i]])
-        print("--------------------")
-        print("Solution found with", len(bins), "bins")
-        print(f"Solver time: {solver_time} seconds")
-        print("Number of variables:", num_variables)
-        print("Number of clauses:", num_clauses)
+                    return BPP_binary_search(lower, mid - 1)
+            else:
+                return BPP_binary_search(lower, mid - 1)
+    else:
+        return -1
     
 
-    # read input file
-
-if __name__ == "__main__": 
-    filepath = f"input_data/class/CL_100_04.txt"
-    with open(filepath, 'r') as f:
-        sys.stdin = f
-        items = []
-        print(f"Reading file {filepath.split('/')[-1]}")
-        read_input()
-        start = time.time()
-        bpp_result = BPP(W, H, items, n_items)
-        stop = time.time()
-        print("Time:", format(stop-start, ".6f"))
-        export_to_xlsx(bpp_result, filepath, format(stop-start, ".6f"))
+# Add/modify the timeout handler function
+def timeout_handler():
+    global best_bins, upper_bound, is_timeout
+    is_timeout = True
+    print(f"\nTimeout reached after {time_out} seconds. Saving current best solution.")
     
+    # Get the best height found so far
+    current_bins = best_bins if best_bins != float('inf') else upper_bound
+    print(f"Best solution found before timeout: {current_bins} bins")
+    
+    # Save result as JSON
+    result = {
+        'Instance': instance_name,
+        'Variables': variables_length,
+        'Clauses': clauses_length,
+        'Runtime': timeit.default_timer() - start,
+        'Optimal_Bins': current_bins,
+        'Status': 'TIMEOUT',
+    }
+    
+    with open(f'results_{instance_name}.json', 'w') as f:
+        json.dump(result, f)
+    
+    # Terminate the program
+    os._exit(0)
+
+# Modify your main execution code (at the bottom of the file)
+if __name__ == "__main__":
+    # Set up the timeout timer
+    timer = threading.Timer(time_out, timeout_handler)
+    timer.daemon = True
+    timer.start()
+    
+    try:
+        input_data = read_file("inputs/class/CL_1_60_1.txt")
+        n_items = int(input_data[0])
+        W, H = map(int, input_data[1].split())
+        rectangles = [[int(val) for val in i.split()] for i in input_data[2:]]
+        print(f"Number of items: {n_items}, Width: {W}, Height: {H}")
+        print(f"Rectangles: {rectangles}")
+        
+        total_area = sum([w * h for w, h in rectangles])
+        lower_bound = math.ceil(total_area / (W * H))
+        print(f"Lower bound: {lower_bound}")
+        upper_bound = n_items
+        best_bins = upper_bound
+        BPP_binary_search(lower_bound, upper_bound)
+        print(f"Optimal bins: {optimal_bins}")
+        print(f"Optimal positions: {optimal_pos}")
+        print(f"Optimal rotations: {optimal_rot}")
+        
+        # Stop the timer if we complete normally
+        timer.cancel()
+        
+    except Exception as e:
+        timer.cancel()
+        print(f"Error occurred: {str(e)}")
+        raise e
+
 

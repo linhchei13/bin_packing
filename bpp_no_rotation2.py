@@ -214,11 +214,15 @@ def OPP(rectangles, max_bins, W, H):
     solver = Glucose3(use_timer=True)
 
     solver.append_formula(cnf)
-    timer = Timer(200, solver_interrupt, [solver])
+    timer = Timer(30, solver_interrupt, [solver])
     timer.start()
     try:
         sat_status = solver.solve_limited(expect_interrupt=True)
-        if sat_status:
+        if sat_status == None:
+            print("Timeout")
+            timer.cancel()
+            return("timeout", None, None, None, len(variables), len(cnf.clauses))
+        elif sat_status == True:
             pos = [[0 for i in range(2)] for j in range(len(rectangles))]
             model = solver.get_model()
             print("SAT")
@@ -245,7 +249,7 @@ def OPP(rectangles, max_bins, W, H):
                 bins_used = []
             for j in range(max_bins):
                 bins_used.append([i for i in range(len(rectangles)) if result[f"x{i + 1},{j + 1}"] == True])
-            return(["sat", bins_used, pos, format(stop-start, '.6f'), len(variables), len(cnf.clauses)])
+            return(["sat", bins_used, pos, format(stop-start, '.3f'), len(variables), len(cnf.clauses)])
 
         else:
             timer.cancel()
@@ -260,13 +264,14 @@ def BPP(W, H, items, n):
     items_area = [i[0] * i[1] for i in items]
     bin_area = W * H
     lower_bound = math.ceil(sum(items_area) / bin_area)
+    result = []
     for k in range(lower_bound, n + 1):
         print("Trying with", k, "bins")
         result = OPP(items, k, W, H)
         if result[0] == "sat":
             print("Solution found with", k, "bins")
-            
             return result[1:]
+    return result[1:]
         
 
 def print_solution(bpp_result):
@@ -361,10 +366,11 @@ def interrupt():
     })
     os._exit(0)   
 # Main
-for i in range(1, 6):
-    # timer = Timer(600, interrupt)
-    # timer.start()
-    filepath = f"input_data/class/CL_020_0{i}.txt"
+# timer = Timer(600, interrupt)
+# timer.start()
+if __name__ == "__main__":
+    
+    filepath = f"input_data/class/CL_080_05.txt"
     print(f"Processing file: {filepath}")
     input = read_file_instance(filepath)
     n = int(input[0])
@@ -375,6 +381,6 @@ for i in range(1, 6):
     start = time.time()
     bpp_result = BPP(W, H, items, n)
     stop = time.time()
-    export_to_xlsx(bpp_result, filepath, format(stop - start, '.6f'))
+    export_to_xlsx(bpp_result, filepath, format(stop - start, '.3f'))
     print("Solver", format(stop - start, '.6f'))
     # print_solution(bpp_result)
