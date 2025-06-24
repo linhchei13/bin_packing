@@ -5,3 +5,4 @@ data_change.py
 e.py
 *.json
 /out
+*.xlsx

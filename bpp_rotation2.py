@@ -23,6 +23,10 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from datetime import datetime
 import fileinput
 import json
+import matplotlib
+import numpy as np
+import threading
+
 
 class TimeoutException(Exception): pass
 n_items = 0
@@ -40,6 +44,7 @@ optimal_rot = []
 time_out = 200  
 instance_name = ""
 
+start = timeit.default_timer()
 #read file
 def read_file(file_path):
     global instance_name
@@ -48,6 +53,7 @@ def read_file(file_path):
     for line in fileinput.input(files=file_path):
         s += line
     return s.splitlines()
+
 def interrupt(solver):
     solver.interrupt()
 def positive_range(end):
@@ -68,38 +74,6 @@ def save_checkpoint(instance, variables, clauses, bins, status="IN_PROGRESS"):
     with open(f'checkpoint_{instance}.json', 'w') as f:
         json.dump(checkpoint, f)
 
-
-def write_to_xlsx(result_dict):
-    # Append the result to a list
-    excel_results = []
-    excel_results.append(result_dict)
-
-    output_path = 'out/'
-
-    # Write the results to an Excel file
-    if not os.path.exists(output_path): os.makedirs(output_path)
-    df = pd.DataFrame(excel_results)
-    current_date = datetime.now().strftime('%Y-%m-%d')
-    excel_file_path = f"{output_path}/results_{current_date}.xlsx"
-
-    # Check if the file already exists
-    if os.path.exists(excel_file_path):
-        try:
-            book = load_workbook(excel_file_path)
-        except BadZipFile:
-            book = Workbook()  # Create a new workbook if the file is not a valid Excel file
-
-        # Check if the 'Results' sheet exists
-        if 'Results' not in book.sheetnames:
-            book.create_sheet('Results')  # Create 'Results' sheet if it doesn't exist
-
-        sheet = book['Results']
-        for row in dataframe_to_rows(df, index=False, header=False): sheet.append(row)
-        book.save(excel_file_path)
-
-    else: df.to_excel(excel_file_path, index=False, sheet_name='Results', header=False)
-
-    print(f"Result added to Excel file: {os.path.abspath(excel_file_path)}\n")
 
 def BPP(n_bins):
 # Define the variables
@@ -334,7 +308,6 @@ def BPP(n_bins):
             pos = [[0 for i in range(2)] for j in range(len(rectangles))]
             rotation = []
             model = solver.get_model()
-            solver_time = format(time.time() - start, ".6f")
             print("SAT")
             result = {}
             for var in model:
@@ -354,11 +327,14 @@ def BPP(n_bins):
                         pos[i][1] = f + 1
                     if f == 0 and result[f"py{i + 1},{f}"] == True:
                         pos[i][1] = 0 
-            bins_used = []
-            for j in range(n_bins):
-                bins_used.append([i for i in range(n_items) if result[f"B{i + 1},{j + 1}"] == True])
+                for j in range(n_bins):
+                    if result[f"B{i + 1},{j + 1}"] == True:
+                        pos[i].append(j)
+            bins_used = [[] for _ in range(n_bins)]
+            for i in range(len(rectangles)):
+                bins_used[pos[i][2]].append(i)
             timer.cancel()
-            return ["sat", bins_used, pos, rotation, solver_time, counter, clauses_counter]
+            return ["sat", pos, rotation]
     except TimeoutException:
         timer.cancel()
         print("Timeout")
@@ -405,9 +381,6 @@ def BPP_binary_search(lower_bound, upper_bound):
                 optimal_pos = result[1]
                 print(f"Optimal positions before: {optimal_pos}")
                 optimal_rot = result[2]
-                for i in range(len(optimal_pos)):
-                    optimal_pos[i].append(optimal_pos[i][1] // H) # append the bin number
-                    optimal_pos[i][1] = optimal_pos[i][1] % H
                 if lower_bound == upper_bound:
                     return -1
                 else:
@@ -417,34 +390,57 @@ def BPP_binary_search(lower_bound, upper_bound):
     else:
         return -1
 
-def export_to_xlsx(bpp_result, filepath, time):
-    result_dict = {}
-    if bpp_result is None:
-        result_dict = {
-            "Type": "SAT direct",
-            "Data": filepath.split("/")[-1],
-            "Number of items": n_items,
-            "Bins": "-",  
-            "Solver time": "-", 
-            "Real time": time,
-            "Variables": "-", 
-            "Clauses": "-"}
-        return
-    else:
-        bins = bpp_result[0]
-        solver_time = bpp_result[3]
-        num_variables = bpp_result[4]
-        num_clauses = bpp_result[5]
-        result_dict = {
-            "Type": "SAT_direct",
-            "Data": filepath.split("/")[-1],
-            "Number of items": n_items,
-            "Bins": len(bins),  
-            "Solver time": solver_time, 
-            "Real time": time,
-            "Variables": num_variables, 
-            "Clauses": num_clauses}
-    write_to_xlsx(result_dict)
+def display_solution_each_bin(W, H, rectangles, positions, rotations):
+    # Group rectangles by bin
+    bins = {}
+    for i, pos in enumerate(positions):
+        bin_id = pos[2] if len(pos) > 2 else 0
+        if bin_id not in bins:
+            bins[bin_id] = []
+        bins[bin_id].append((i, pos, rotations[i]))
+    # Use the new colormap API for compatibility
+    cmap = matplotlib.colormaps.get_cmap('tab20')
+    colors = [cmap(i % cmap.N) for i in range(len(rectangles))]
+    n_bins = len(bins)
+    ncols = min(n_bins, 4)
+    nrows = (n_bins + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 6 * nrows))
+    if n_bins == 1:
+        axes = np.array([[axes]])
+    elif nrows == 1:
+        axes = np.array([axes])
+    elif ncols == 1:
+        axes = np.array([[ax] for ax in axes])
+    axes = axes.flatten()
+    for idx, (bin_id, rects) in enumerate(sorted(bins.items())):
+        ax = axes[idx]
+        ax.set_title(f'Bin {bin_id+1}')
+        ax.set_xlim(0, W)
+        ax.set_ylim(0, H)
+        ax.set_aspect('equal')
+        ax.set_xlabel('Width')
+        ax.set_ylabel('Height')
+        for ridx, pos, rot in rects:
+            w, h = rectangles[ridx]
+            if rot:
+                w, h = h, w
+            x0, y0 = pos[0], pos[1]
+            rect_patch = plt.Rectangle((x0, y0), w, h, edgecolor='black', facecolor=colors[ridx], alpha=0.7)
+            ax.add_patch(rect_patch)
+            cx, cy = x0 + w/2, y0 + h/2
+            rgb = matplotlib.colors.to_rgb(colors[ridx])
+            brightness = 0.299*rgb[0] + 0.587*rgb[1] + 0.114*rgb[2]
+            text_color = 'white' if brightness < 0.6 else 'black'
+            rot_info = 'R' if rot else 'NR'
+            ax.text(cx, cy, f'{ridx+1}\n{rot_info}', ha='center', va='center', color=text_color, fontweight='bold')
+        ax.set_xticks(range(0, W+1, max(1, W//10)))
+        ax.set_yticks(range(0, H+1, max(1, H//10)))
+        ax.grid(True, linestyle='--', alpha=0.3)
+    # Hide unused subplots
+    for j in range(idx+1, len(axes)):
+        axes[j].axis('off')
+    plt.tight_layout()
+    plt.show()
 
 def display_solution(strip, rectangles, pos_circuits, rotation):
     # define Matplotlib figure and axis
@@ -473,61 +469,79 @@ def display_solution(strip, rectangles, pos_circuits, rotation):
     plt.show()
 
 
-def print_solution(bpp_result):
-    if bpp_result is None:
-        print("No solution found")
-        return
-    else:
-        bins = bpp_result[0]
-        pos = bpp_result[1]
-        rotation = bpp_result[2]
-        solver_time = bpp_result[3]
-        num_variables = bpp_result[4]
-        num_clauses = bpp_result[5]
-        for i in range(len(bins)):
-            print("Bin", i + 1, "contains items", [(j + 1) for j in bins[i]])
-            for j in bins[i]:
-                if rotation[j]:
-                    print("Rotated item", j + 1, rectangles[j], "at position", pos[j])
-                else:
-                    print("Item", j + 1, rectangles[j], "at position", pos[j])
-            display_solution((W, H), [rectangles[j] for j in bins[i]], [pos[j] for j in bins[i]], [rotation[j] for j in bins[i]])
-        print("--------------------")
-        print("Solution found with", len(bins), "bins")
-        print("Solver time:", solver_time)
-        print("Number of variables:", num_variables)
-        print("Number of clauses:", num_clauses)
- 
+def write_to_xlsx(result_dict):
+    df = pd.DataFrame([result_dict])
+    output_path = 'bpp_rotation2.xlsx'
+    # If file exists, append, else create new
+    if os.path.exists(output_path):
+        old_df = pd.read_excel(output_path)
+        df = pd.concat([old_df, df], ignore_index=True)
+    df.to_excel(output_path, index=False)
 
-def interrupt():
-    print("Timeout")
-    write_to_xlsx({
-        "Type": "SAT direct",
-        "Dataset": filepath.split("/")[-1],
-        "Number of items": n_items,
-        "Bins": "-",
-        "Solver time": "timeout",
-        "Real time": "timeout",
-        "Number of variables": "-",
-        "Number of clauses": "-"
-    })
+def timeout_handler():
+    global best_bins, upper_bound, is_timeout
+    is_timeout = True
+    print(f"\nTimeout reached after {time_out} seconds. Saving current best solution.")
+    
+    # Get the best height found so far
+    current_bins = best_bins if best_bins != float('inf') else upper_bound
+    print(f"Best solution found before timeout: {current_bins} bins")
+    
+    # Save result as JSON
+    result = {
+        'Instance': instance_name,
+        'Variables': variables_length,
+        'Clauses': clauses_length,
+        'Runtime': timeit.default_timer() - start,
+        'Optimal_Bins': current_bins,
+        'Status': 'TIMEOUT',
+    }
+    
+    with open(f'results_{instance_name}.json', 'w') as f:
+        json.dump(result, f)
+    write_to_xlsx(result)
+    # Terminate the program
     os._exit(0)
 
-if __name__ == '__main__':
-    filepath = f"inputs/CLASS/CL_1_20_1.txt"
-    lines = read_file(filepath)
-    n_items = int(lines[0])
-    W, H = map(int, lines[1].split())
-    rectangles = [list(map(int, line.split())) for line in lines[2:n_items + 2]]
-    lower_bound = math.ceil(sum([r[0] * r[1] for r in rectangles]) / (W * H))
-    upper_bound = n_items
-    print("Reading file", filepath.split("/")[-1])
-    start = time.time()
-    bpp_result = BPP_linear_search(lower_bound, upper_bound)
+if __name__ == "__main__":
+    # Set up the timeout timer
+    timer = threading.Timer(time_out, timeout_handler)
+    timer.daemon = True
+    timer.start()
     
-    stop = time.time()
-    print("Time:", stop - start)
-    export_to_xlsx(bpp_result, filepath, format(stop-start, ".3f"))
-    print_solution(bpp_result)
+    try:
+        input_data = read_file("inputs/class/CL_1_60_1.txt")
+        n_items = int(input_data[0])
+        W, H = map(int, input_data[1].split())
+        rectangles = [[int(val) for val in i.split()] for i in input_data[2:]]
+        print(f"Number of items: {n_items}, Width: {W}, Height: {H}")
+        print(f"Rectangles: {rectangles}")
+        total_area = sum([w * h for w, h in rectangles])
+        lower_bound = math.ceil(total_area / (W * H))
+        print(f"Lower bound: {lower_bound}")
+        upper_bound = n_items
+        best_bins = upper_bound
+        BPP_binary_search(lower_bound, upper_bound)
+        print(f"Optimal bins: {optimal_bins}")
+        print(f"Optimal positions: {optimal_pos}")
+        print(f"Optimal rotations: {optimal_rot}")
+        # Save result to Excel after successful run
+        result = {
+            'Instance': instance_name,
+            'Variables': variables_length,
+            'Clauses': clauses_length,
+            'Runtime': timeit.default_timer() - start,
+            'Optimal_Bins': optimal_bins,
+            'Status': 'SUCCESS',
+        }
+        write_to_xlsx(result)
+        display_solution_each_bin(W, H, rectangles, optimal_pos, optimal_rot)
+        # Stop the timer if we complete normally
+        timer.cancel()
+        
+    except Exception as e:
+        timer.cancel()
+        print(f"Error occurred: {str(e)}")
+        raise e
 
 

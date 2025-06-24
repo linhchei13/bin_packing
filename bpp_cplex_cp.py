@@ -1,250 +1,227 @@
-from docplex.cp.model import CpoModel
 import sys
-import pandas as pd
 import os
 import time
-from openpyxl import load_workbook
-from openpyxl import Workbook
-from zipfile import BadZipFile
+import math
+import threading
+import json
+from datetime import datetime
+import pandas as pd
+from openpyxl import load_workbook, Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
-from datetime import datetime 
-from matplotlib import pyplot as plt
+from zipfile import BadZipFile
+from docplex.cp.model import CpoModel
+import matplotlib.pyplot as plt
+import matplotlib
+import numpy as np
+
+# Global variables
 W, H = 0, 0
-global result_dict
+instance_name = ""
+time_out = 600  # seconds (default)
 result_dict = {}
+optimal_bins = 0
+optimal_pos = []
+optimal_rot = []
+is_timeout = False
+start = time.time()
+
+# Unified input reader
+
+def read_file(file_path):
+    global instance_name
+    instance_name = os.path.splitext(os.path.basename(file_path))[0]
+    with open(file_path, 'r') as f:
+        lines = f.read().splitlines()
+    return lines
 
 def input_data(file_path):
     global W, H
-    data = {}
-    f = open(file_path,'r')
-    
-    data['size_item'] = []
-    data['size_bin'] = []
-    n = int(f.readline())
-    W, H = map(int, f.readline().split())
-    data['size_bin'].append([W, H])
-    for i in range(1,n+1):
-        line = f.readline().split()
-        data['size_item'].append([int(line[0]),int(line[1])])
-    
-    return n,data,W,H
+    input_lines = read_file(file_path)
+    n = int(input_lines[0])
+    W, H = map(int, input_lines[1].split())
+    rectangles = [list(map(int, line.split())) for line in input_lines[2:2+n]]
+    return n, rectangles, W, H
 
+def timeout_handler():
+    global result_dict, is_timeout
+    is_timeout = True
+    print(f"\nTimeout reached after {time_out} seconds. Saving current best solution.")
+    # Save result as JSON
+    result_dict['Status'] = 'TIMEOUT'
+    result_dict['Runtime'] = format(time.time() - start, '.3f')
+    save_json(result_dict)
+    write_to_xlsx(result_dict)
+    os._exit(0)
 
-def display_solution(strip, rectangles, pos_circuits, rotation):
-    # define Matplotlib figure and axis
-    fig, ax = plt.subplots()
-    ax = plt.gca()
-    plt.title(strip)
-
-    if len(pos_circuits) > 0:
-        for i in range(len(rectangles)):
-            rect = plt.Rectangle(pos_circuits[i],
-                                 rectangles[i][0] if not rotation[i] else rectangles[i][1],
-                                 rectangles[i][1] if not rotation[i] else rectangles[i][0],
-                                 edgecolor="#333")
-            ax.add_patch(rect)
-
-    ax.set_xlim(0, strip[0])
-    ax.set_ylim(0, strip[1] + 1)
-    ax.set_xticks(range(strip[0] + 1))
-    ax.set_yticks(range(strip[1] + 1))
-    ax.set_xlabel('width')
-    ax.set_ylabel('height')
-    # display plot
-    plt.show()
+def save_json(result):
+    output_path = 'results_' + instance_name + '.json'
+    with open(output_path, 'w') as f:
+        json.dump(result, f, indent=2)
+    print(f"Result saved to {output_path}")
 
 def write_to_xlsx(result_dict):
-    # Append the result to a list
-    excel_results = []
-    excel_results.append(result_dict)
+    df = pd.DataFrame([result_dict])
+    output_path = 'bpp_cplex_cp.xlsx'
+    if os.path.exists(output_path):
+        old_df = pd.read_excel(output_path)
+        df = pd.concat([old_df, df], ignore_index=True)
+    df.to_excel(output_path, index=False)
+    print(f"Result added to Excel file: {os.path.abspath(output_path)}\n")
 
-    output_path = 'out/'
-
-    # Write the results to an Excel file
-    if not os.path.exists(output_path): os.makedirs(output_path)
-    df = pd.DataFrame(excel_results)
-    current_date = datetime.now().strftime('%Y-%m-%d')
-    excel_file_path = f"{output_path}/results_{current_date}.xlsx"
-
-    # Check if the file already exists
-    if os.path.exists(excel_file_path):
-        try:
-            book = load_workbook(excel_file_path)
-        except BadZipFile:
-            book = Workbook()  # Create a new workbook if the file is not a valid Excel file
-
-        # Check if the 'Results' sheet exists
-        if 'Results' not in book.sheetnames:
-            book.create_sheet('Results')  # Create 'Results' sheet if it doesn't exist
-
-        sheet = book['Results']
-        for row in dataframe_to_rows(df, index=False, header=False): sheet.append(row)
-        book.save(excel_file_path)
-
-    else: df.to_excel(excel_file_path, index=False, sheet_name='Results', header=False)
-
-    print(f"Result added to Excel file: {os.path.abspath(excel_file_path)}\n")
+def display_solution_each_bin(W, H, rectangles, positions, rotations):
+    # Group rectangles by bin
+    bins = {}
+    for i, pos in enumerate(positions):
+        bin_id = pos[2] if len(pos) > 2 else 0
+        if bin_id not in bins:
+            bins[bin_id] = []
+        bins[bin_id].append((i, pos, rotations[i]))
+    cmap = matplotlib.colormaps.get_cmap('tab20')
+    colors = [cmap(i % cmap.N) for i in range(len(rectangles))]
+    n_bins = len(bins)
+    ncols = min(n_bins, 4)
+    nrows = (n_bins + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 6 * nrows))
+    if n_bins == 1:
+        axes = np.array([[axes]])
+    elif nrows == 1:
+        axes = np.array([axes])
+    elif ncols == 1:
+        axes = np.array([[ax] for ax in axes])
+    axes = axes.flatten()
+    for idx, (bin_id, rects) in enumerate(sorted(bins.items())):
+        ax = axes[idx]
+        ax.set_title(f'Bin {bin_id+1}')
+        ax.set_xlim(0, W)
+        ax.set_ylim(0, H)
+        ax.set_aspect('equal')
+        ax.set_xlabel('Width')
+        ax.set_ylabel('Height')
+        for ridx, pos, rot in rects:
+            w, h = rectangles[ridx]
+            if rot:
+                w, h = h, w
+            x0, y0 = pos[0], pos[1]
+            rect_patch = plt.Rectangle((x0, y0), w, h, edgecolor='black', facecolor=colors[ridx], alpha=0.7)
+            ax.add_patch(rect_patch)
+            cx, cy = x0 + w/2, y0 + h/2
+            rgb = matplotlib.colors.to_rgb(colors[ridx])
+            brightness = 0.299*rgb[0] + 0.587*rgb[1] + 0.114*rgb[2]
+            text_color = 'white' if brightness < 0.6 else 'black'
+            rot_info = 'R' if rot else 'NR'
+            ax.text(cx, cy, f'{ridx+1}\n{rot_info}', ha='center', va='center', color=text_color, fontweight='bold')
+        ax.set_xticks(range(0, W+1, max(1, W//10)))
+        ax.set_yticks(range(0, H+1, max(1, H//10)))
+        ax.grid(True, linestyle='--', alpha=0.3)
+    for j in range(idx+1, len(axes)):
+        axes[j].axis('off')
+    plt.tight_layout()
+    plt.show()
 
 def main_solver(file_path, time_limit):
-    n,data,W,H = input_data(file_path)
+    global result_dict, optimal_bins, optimal_pos, optimal_rot
+    n, rectangles, W, H = input_data(file_path)
     k = n
-    print('Number of items:',n)
-    print('Size of bin:',W,H)
-    
-    # Create CP model
+    print(f'Number of items: {n}')
+    print(f'Size of bin: {W} {H}')
     model = CpoModel()
-    
-    # Define variables
-    # For each item, create a tuple (bin, x, y, rot)
-    # bin: which bin the item is in (0 to k-1)
-    # x, y: coordinates of the bottom-left corner
-    # rot: 1 if rotated by 90 degrees, 0 otherwise
     bin_vars = [model.integer_var(0, k-1, f"bin_{i}") for i in range(n)]
     x_vars = [model.integer_var(0, W, f"x_{i}") for i in range(n)]
     y_vars = [model.integer_var(0, H, f"y_{i}") for i in range(n)]
     rot_vars = [model.binary_var(f"rot_{i}") for i in range(n)]
-    
-    # Create variables for bin usage
     bin_used = [model.binary_var(f"bin_used_{j}") for j in range(k)]
-    
-    # Compute width and height based on rotation
     widths = []
     heights = []
     for i in range(n):
-        w = data['size_item'][i][0]
-        h = data['size_item'][i][1]
-        # Width is w if not rotated, h if rotated
+        w = rectangles[i][0]
+        h = rectangles[i][1]
         width_i = model.conditional(rot_vars[i] == 1, h, w)
-        # Height is h if not rotated, w if rotated
         height_i = model.conditional(rot_vars[i] == 1, w, h)
         widths.append(width_i)
         heights.append(height_i)
-    
-    
-    
-    # Ensure items stay within bin boundaries
     for i in range(n):
         model.add(x_vars[i] + widths[i] <= W)
         model.add(y_vars[i] + heights[i] <= H)
-    
-    # Non-overlap constraints between items in the same bin
     for i in range(n-1):
         for j in range(i+1, n):
-            # If items i and j are in the same bin
             same_bin = (bin_vars[i] == bin_vars[j])
-            
-            # Then they must not overlap
-            # Either i is to the left of j, or i is to the right of j,
-            # or i is below j, or i is above j
             no_overlap = model.logical_or([
-                x_vars[i] + widths[i] <= x_vars[j],  # i is to the left of j
-                x_vars[j] + widths[j] <= x_vars[i],  # j is to the left of i
-                y_vars[i] + heights[i] <= y_vars[j],  # i is below j
-                y_vars[j] + heights[j] <= y_vars[i],  # j is below i
+                x_vars[i] + widths[i] <= x_vars[j],
+                x_vars[j] + widths[j] <= x_vars[i],
+                y_vars[i] + heights[i] <= y_vars[j],
+                y_vars[j] + heights[j] <= y_vars[i],
             ])
-            
-            # If same_bin is true, then no_overlap must be true
             model.add(model.logical_or([model.logical_not(same_bin), no_overlap]))
-    
-    # Connect bin_used variables to bin_vars
     for j in range(k):
-        # bin_used[j] is true if any item is in bin j
         model.add(bin_used[j] == model.logical_or([bin_vars[i] == j for i in range(n)]))
-    
-    
-    # Objective: minimize number of bins used
     model.minimize(model.sum(bin_used))
-    
-    # Set time limit
     model.set_parameters(TimeLimit=time_limit)
-    
-    # Solve model
     print('--------------Solving--------------')
-    start = time.time()
+    solve_start = time.time()
     solution = model.solve(TimeLimit=time_limit)
-    stop = time.time()
-    solve_time = stop - start
-    print("Solving time: ", solve_time)
-
-    
-    global result_dict
+    solve_time = time.time() - solve_start
     result_dict = {
         "Type": "CPLEX CP",
-        'Problem': file_path.split("/")[-1],
+        'Instance': instance_name,
         "Number of items": n,
         "Width": W,
         "Height": H,
-        "Number of bins": 0,
-        "Time": format(solve_time, '.6f'),
-        "Result": "UNKNOWN",
+        "Optimal_Bins": 0,
+        "Runtime": format(solve_time, '.3f'),
+        "Status": "UNKNOWN",
     }
-    
     if solution:
-        print('--------------Solution Found--------------')
-        # Extract solution
-        bin_assignments = [solution.get_value(bin_vars[i]) for i in range(n)]
-        x_positions = [solution.get_value(x_vars[i]) for i in range(n)]
-        y_positions = [solution.get_value(y_vars[i]) for i in range(n)]
-        rotations = [solution.get_value(rot_vars[i]) for i in range(n)]
-        
-        print(rotations)
-        # Count used bins
+        bin_assignments = [int(solution.get_value(bin_vars[i])) for i in range(n)]
+        x_positions = [int(solution.get_value(x_vars[i])) for i in range(n)]
+        y_positions = [int(solution.get_value(y_vars[i])) for i in range(n)]
+        rotations = [int(solution.get_value(rot_vars[i])) for i in range(n)]
         used_bins = set(bin_assignments)
         num_bins_used = len(used_bins)
-        
-        # Print solution
-        for j in sorted(used_bins):
-            print(f"Bin {j+1}:")
-            items_in_bin = [i for i in range(n) if bin_assignments[i] == j]
-            for i in items_in_bin:
-                w = data['size_item'][i][0]
-                h = data['size_item'][i][1]
-                print(f'  Put item {i+1} {data["size_item"][i]} with rotation {rotations[i]} at ({x_positions[i]},{y_positions[i]})')
-            print("-------")
-            # Uncomment to display solution
-            # display_solution((W, H), 
-            #                 [data['size_item'][i] for i in items_in_bin],
-            #                 [(x_positions[i], y_positions[i]) for i in items_in_bin], 
-            #                 [rotations[i] for i in items_in_bin])
-        
-        result_dict["Number of bins"] = num_bins_used
-        result_dict["Result"] = "SAT"
+        positions = []
+        for i in range(n):
+            positions.append([x_positions[i], y_positions[i], bin_assignments[i]])
+        optimal_bins = num_bins_used
+        optimal_pos[:] = positions
+        optimal_rot[:] = rotations
+        result_dict["Optimal_Bins"] = num_bins_used
+        result_dict["Status"] = "SUCCESS" if solution.is_solution_optimal() else "FEASIBLE"
         print(f'Number of bins used: {num_bins_used}')
-        print('----------------Statistics----------------')
-        
-        if solution.is_solution_optimal():
-            print('Status: OPTIMAL')
-        else:
-            print('Status: FEASIBLE')
-            
-        print(f'Time limit: {time_limit}')
-        print(f'Running time: {solve_time}')               
-        return n, num_bins_used, format(solve_time, '.6f')
+        print(f'Optimal positions: {positions}')
+        print(f'Optimal rotations: {rotations}')
+        return n, num_bins_used, solve_time, positions, rotations
     else:
         if solution is None:
-            result_dict["Result"] = "UNKNOWN"
+            result_dict["Status"] = "TIMEOUT"
             print('NO SOLUTION FOUND - TIMEOUT')
-            return n, '-', format(solve_time, '.6f')
         else:
-            result_dict["Result"] = "UNSAT"
+            result_dict["Status"] = "UNSAT"
             print('INFEASIBLE')
-            return n, '-', format(solve_time, '.6f')
-
+        return n, '-', solve_time, [], []
 
 if __name__ == '__main__':
-
-        try:
-            # Get time limit
-            time_limit = int(sys.argv[1]) if len(sys.argv) > 1 else 100
-        except IndexError:
-            time_limit = 100
-           
-        # Create solver
-        file_path = f'input_data/test.txt'
-        print("Reading file: ", file_path.split("/")[-1])
-        start = time.time()
-        n, n_bins, solver_time = main_solver(file_path, time_limit)
-        stop = time.time()
-        
-        result_dict["Real time"] = format(stop - start, '.6f')
+    try:
+        # Get time limit
+        if len(sys.argv) > 1:
+            time_out = int(sys.argv[1])
+        else:
+            time_out = 100
+        file_path = 'inputs/class/CL_1_20_1.txt'  # Change as needed
+        print("Reading file:", os.path.basename(file_path))
+        timer = threading.Timer(time_out, timeout_handler)
+        timer.daemon = True
+        timer.start()
+        start_main = time.time()
+        n, n_bins, solver_time, positions, rotations = main_solver(file_path, time_out)
+        result_dict["Real time"] = format(time.time() - start_main, '.3f')
         write_to_xlsx(result_dict)
+        save_json(result_dict)
+        if positions and rotations:
+            display_solution_each_bin(W, H, [[int(x), int(y)] for x, y in read_file(file_path)[2:2+n]], positions, rotations)
+        timer.cancel()
+    except Exception as e:
+        print(f"Error occurred: {str(e)}")
+        try:
+            timer.cancel()
+        except:
+            pass
+        raise

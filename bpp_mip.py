@@ -1,3 +1,4 @@
+import timeit
 from ortools.linear_solver import pywraplp
 import sys
 import pandas as pd
@@ -8,224 +9,280 @@ from openpyxl import load_workbook
 from openpyxl import Workbook
 from zipfile import BadZipFile
 from openpyxl.utils.dataframe import dataframe_to_rows
-from datetime import datetime 
-from matplotlib import pyplot as plt
-def input_data(file_path):
-    data = {}
-    f = open(file_path,'r')
-    
-    data['size_item'] = []
-    data['size_bin'] = []
-    n = int(f.readline())
-    W, H = map(int, f.readline().split())
-    data['size_bin'].append([W, H])
-    for i in range(1,n+1):
-        line = f.readline().split()
-        data['size_item'].append([int(line[0]),int(line[1])])
-    
-    return n,data,W,H
+from datetime import datetime
+import fileinput
+import json
+import matplotlib.pyplot as plt
+import matplotlib
+import matplotlib.colors
+import numpy as np
 
-def display_solution(strip, rectangles, pos_circuits, rotation):
-    # define Matplotlib figure and axis
-    fig, ax = plt.subplots()
-    ax = plt.gca()
-    plt.title(strip)
+# Global variables
+n_items = 0
+W, H = 0, 0
+upper_bound = 0
+rectangles = []
+variables_length = 0
+clauses_length = 0
+best_bins = 0
+best_pos = []
+best_rot = []
+optimal_bins = 0
+optimal_pos = []
+optimal_rot = []
+time_out = 600  
+instance_name = ""
 
-    if len(pos_circuits) > 0:
-        for i in range(len(rectangles)):
-            rect = plt.Rectangle(pos_circuits[i],
-                                 rectangles[i][0] if not rotation[i] else rectangles[i][1],
-                                 rectangles[i][1] if not rotation[i] else rectangles[i][0],
-                                 edgecolor="#333")
-            ax.add_patch(rect)
+#read file
+def read_file(file_path):
+    global instance_name
+    instance_name = file_path.split("/")[-1].split(".")[0]  # Lấy tên file không có phần mở rộng
+    s = ""
+    for line in fileinput.input(files=file_path):
+        s += line
+    return s.splitlines()
 
-    ax.set_xlim(0, strip[0])
-    ax.set_ylim(0, strip[1] + 1)
-    ax.set_xticks(range(strip[0] + 1))
-    ax.set_yticks(range(strip[1] + 1))
-    ax.set_xlabel('width')
-    ax.set_ylabel('height')
-    # display plot
-    plt.show()
+def read_input(file_path):
+    global instance_name
+    instance_name = file_path.split("/")[-1].split(".")[0]  # Lấy tên file không có phần mở rộng
+    with open(file_path) as f:
+        data = f.readlines()
+        n_packs = int(data[0])
+        n_bins = n_packs
+        W, H = map(int, data[1].split())
+        packs = []
+        for i in range(2, n_packs+2):
+            line = data[i].split()
+            packs.append([int(line[0]), int(line[1])])
 
+    return n_packs, n_bins, packs, W, H
 
 def write_to_xlsx(result_dict):
-    # Append the result to a list
-    excel_results = []
-    excel_results.append(result_dict)
-
-    output_path = 'out/'
-
-    # Write the results to an Excel file
-    if not os.path.exists(output_path): os.makedirs(output_path)
-    df = pd.DataFrame(excel_results)
-    current_date = datetime.now().strftime('%Y-%m-%d')
-    excel_file_path = f"{output_path}/results_{current_date}.xlsx"
-
-    # Check if the file already exists
-    if os.path.exists(excel_file_path):
-        try:
-            book = load_workbook(excel_file_path)
-        except BadZipFile:
-            book = Workbook()  # Create a new workbook if the file is not a valid Excel file
-
-        # Check if the 'Results' sheet exists
-        if 'Results' not in book.sheetnames:
-            book.create_sheet('Results')  # Create 'Results' sheet if it doesn't exist
-
-        sheet = book['Results']
-        for row in dataframe_to_rows(df, index=False, header=False): sheet.append(row)
-        book.save(excel_file_path)
-
-    else: df.to_excel(excel_file_path, index=False, sheet_name='Results', header=False)
-
-    print(f"Result added to Excel file: {os.path.abspath(excel_file_path)}\n")
-def main_solver(file_path, time_limit):
-    n,data,W,H = input_data(file_path)
-    k = n
-    print('Number of items:',n)
-    print('Size of bin:',W,H)
-    solver = pywraplp.Solver.CreateSolver('SCIP')
+    df = pd.DataFrame([result_dict])
+    output_path = 'bpp_mip.xlsx'
+    # If file exists, append, else create new
+    if os.path.exists(output_path):
+        old_df = pd.read_excel(output_path)
+        df = pd.concat([old_df, df], ignore_index=True)
+    df.to_excel(output_path, index=False)
     
-    # Create variables
-    M = 1000000
+def display_solution_each_bin(W, H, rectangles, positions, rotations):
+    # Group rectangles by bin
+    bins = {}
+    for i, pos in enumerate(positions):
+        bin_id = pos[2] if len(pos) > 2 else 0
+        if bin_id not in bins:
+            bins[bin_id] = []
+        bins[bin_id].append((i, pos, rotations[i]))
+    # Use the new colormap API for compatibility
+    cmap = matplotlib.colormaps.get_cmap('tab20')
+    colors = [cmap(i % cmap.N) for i in range(len(rectangles))]
+    n_bins = len(bins)
+    ncols = min(n_bins, 4)
+    nrows = (n_bins + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 6 * nrows))
+    if n_bins == 1:
+        axes = np.array([[axes]])
+    elif nrows == 1:
+        axes = np.array([axes])
+    elif ncols == 1:
+        axes = np.array([[ax] for ax in axes])
+    axes = axes.flatten()
+    for idx, (bin_id, rects) in enumerate(sorted(bins.items())):
+        ax = axes[idx]
+        ax.set_title(f'Bin {bin_id+1}')
+        ax.set_xlim(0, W)
+        ax.set_ylim(0, H)
+        ax.set_aspect('equal')
+        ax.set_xlabel('Width')
+        ax.set_ylabel('Height')
+        for ridx, pos, rot in rects:
+            w, h = rectangles[ridx]
+            if rot:
+                w, h = h, w
+            x0, y0 = pos[0], pos[1]
+            rect_patch = plt.Rectangle((x0, y0), w, h, edgecolor='black', facecolor=colors[ridx], alpha=0.7)
+            ax.add_patch(rect_patch)
+            cx, cy = x0 + w/2, y0 + h/2
+            rgb = matplotlib.colors.to_rgb(colors[ridx])
+            brightness = 0.299*rgb[0] + 0.587*rgb[1] + 0.114*rgb[2]
+            text_color = 'white' if brightness < 0.6 else 'black'
+            rot_info = 'R' if rot else 'NR'
+            ax.text(cx, cy, f'{ridx+1}\n{rot_info}', ha='center', va='center', color=text_color, fontweight='bold')
+        ax.set_xticks(range(0, W+1, max(1, W//10)))
+        ax.set_yticks(range(0, H+1, max(1, H//10)))
+        ax.grid(True, linestyle='--', alpha=0.3)
+    # Hide unused subplots
+    for j in range(idx+1, len(axes)):
+        axes[j].axis('off')
+    plt.tight_layout()
+    plt.show()
 
-    x = {} # x[(i,m)] = 1 iff item i is packed in car m else 0
-    # Ro represent for R in the presentation file/ pdf model file
-    Ro = {} # if Ro = 1 then rotation = 90 degree, else 0
-    l = {} # left coordination of item
-    r = {} # right coordination of item
-    t = {} # top coordination of item
-    b = {} # bottom coodination of item
+def BPP_MIP(file_path, time_limit):
+    n_items, n_bins, items, W, H = read_input(file_path)
+    max_pack_width = max(x[0] for x in items)
+    max_pack_height = max(x[1] for x in items)
+    print(f"Max pack width: {max_pack_width}")
+    start = timeit.default_timer()
+    
+    # Create the MIP solver
+    solver = pywraplp.Solver.CreateSolver('SCIP')
+    if not solver:
+        print('SCIP solver unavailable.')
+        return
 
-    for i in range(n):
-        Ro[i] = solver.IntVar(0, 1, 'Ro[%i] '%i)
+    # Variables
+    B = {}
+    R = []
+    for i in range(n_items):
+        # R[i] = 1 iff item i is rotated
+        R.append(solver.BoolVar(f'package_{i}_rotated'))
+        for j in range(n_bins):
+            # B[i, j] = 1 iff item i is packed in bin j.
+            B[i, j] = solver.BoolVar(f'pack_{i}_in_bin_{j}')
 
-        # coordinate
-        l[i] = solver.IntVar(0, W,'l[%i]' % i)
-        r[i] = solver.IntVar(0, W,'r[%i]' % i)
-        t[i] = solver.IntVar(0, H,'t[%i]' % i)
-        b[i] = solver.IntVar(0, H,'b[%i]' % i)        
+    # Z[j] = 1 iff bin j has been used.
+    Z = [solver.BoolVar(f'bin_{j}_is_used') for j in range(n_bins)]
 
-        solver.Add(r[i] == (1-Ro[i]) * data['size_item'][i][0] + Ro[i] * data['size_item'][i][1] + l[i])
-        solver.Add(t[i] == (1-Ro[i]) * data['size_item'][i][1] + Ro[i] * data['size_item'][i][0] + b[i])
+    # Width and height of each pack
+    width = []
+    height = []
+    # coordinate 
+    x = []
+    y = [] 
+    for i in range(n_items):
+        wi, hi = items[i][0], items[i][1]
+        width.append(solver.IntVar(0, max_pack_width, f'width_{i}'))
+        height.append(solver.IntVar(0, max_pack_height, f'height_{i}'))
 
-        for m in range(k):
+        x.append(solver.IntVar(0, W, f'x_{i}'))
+        y.append(solver.IntVar(0, H, f'y_{i}'))
 
-            x[(i,m)] = solver.IntVar(0, 1, 'x_[%i]_[%i]' %(i,m))
-
-            # item i must not exceed area of car
-            solver.Add(r[i] <= (1-x[(i,m)]) * M + W)
-            solver.Add(l[i] <= (1-x[(i,m)]) * M + W)
-            solver.Add(t[i] <= (1-x[(i,m)]) * M + H)
-            solver.Add(b[i] <= (1-x[(i,m)]) * M + H)    
-
-    for i in range(n):
-        solver.Add(sum(x[(i,m)] for m in range(k)) == 1)
-
-
-    # if 2 items is packed in the same car, they must be not overlaped
-    for i in range(n - 1):
-        for j in range(i + 1, n):
-            for m in range(k):
-                e = solver.IntVar(0, 1, f'e[{i}][{j}]')
-                solver.Add(e >= x[i,m] + x[j,m] - 1)
-                solver.Add(e <= x[i,m])
-                solver.Add(e <= x[j,m])
-
-                # Binary variables for each constraint
-                c1 = solver.IntVar(0, 1, f'c1[{i}][{j}]')
-                c2 = solver.IntVar(0, 1, f'c2[{i}][{j}]')
-                c3 = solver.IntVar(0, 1, f'c3[{i}][{j}]')
-                c4 = solver.IntVar(0, 1, f'c4[{i}][{j}]')
-                
-                # Constraints that the binary variables must satisfy
-                solver.Add(r[i] <= l[j] + M * (1 - c1))
-                solver.Add(r[j] <= l[i] + M * (1 - c2))
-                solver.Add(t[i] <= b[j] + M * (1 - c3))
-                solver.Add(t[j] <= b[i] + M * (1 - c4))
-
-                solver.Add(c1 + c2 + c3 + c4 + (1-e)*M >= 1 )
-                solver.Add(c1 + c2 + c3 + c4 <= e*M )
-
-    # find cars be used
-    z = {} # z[m] = 1 iff car m be used
-    for m in range(k):
-        z[m] = solver.IntVar(0, 1, 'z[%i] ' %m)
-        # if sum(x[i][m]) >= 1 then car m be used => z[m] = 1
-        # else, z[m] = 0
-
-        q = solver.IntVar(0,n,f'q[{m}]')
-        solver.Add(q == sum(x[(i,m)] for i in range(n)))
-        # car m be used iff there are at least 1 item be packed in car m, so sum(x[(i,m)] for i in range(n)) != 0 
+        # if pack rotated -> switch the height and width
+        # width[i] = wi * (1 - R[i]) + hi * R[i]
+        # height[i] = hi * (1 - R[i]) + wi * R[i]
+        solver.Add(width[i] == wi * (1 - R[i]) + hi * R[i])
+        solver.Add(height[i] == hi * (1 - R[i]) + wi * R[i])
         
-        # q = 0 => z[m] = 0
-        # q != 0 => z[m] = 1
-        solver.Add(z[m] <= q * M)
-        solver.Add(q <= z[m] * M)
-
-    # objective
-    bin = sum(z[m] for m in range(k))
-    solver.Minimize(bin)
-    solver.set_time_limit(time_limit * 1000)
-
-    status = solver.Solve()
-    bins = []
-    for j in range(k):
-        bins.append([i for i in range(n) if x[i,j].solution_value() ==1])
-    rotation = [Ro[i].solution_value() for i in range(n)]
-    pos = [(l[i].solution_value(), b[i].solution_value()) for i in range(n)]
-    print(bins)
-    result_dict = {}
-    if solver.Solve() == pywraplp.Solver.OPTIMAL or solver.Solve() == pywraplp.Solver.FEASIBLE:
-        print('--------------Solution Found--------------')
-        for i in range(n):
-            print(f'put item {i+1} with rotation {int(Ro[i].solution_value())}', end=' ') 
-            for j in range(k):
-                if x[i,j].solution_value() ==1:
-                    print(f'in bin {j+1}', end=' ')
+        if wi > W or hi > H:
+            solver.Add(R[i] == 1)
+        # If it is a square (or cannot be rotated because rotated dims are out-of-bound), prevent rotation.
+        if wi == hi or (wi > H or hi > W):
+            solver.Add(R[i] == 0)
+    
+    # Constraints
+    # Each pack can only be placed in one bin
+    for i in range(n_items):
+        solver.Add(sum(B[i, j] for j in range(n_bins)) == 1)
+        
+    # Domain constraints with big-M method
+    M = max(W, H)  # Big-M value
+    for i in range(n_items):
+        for j in range(n_bins):
+            # If item i is in bin j, then position constraints must hold
+            solver.Add(x[i] + width[i] <= W + M * (1 - B[i, j]))
+            solver.Add(y[i] + height[i] <= H + M * (1 - B[i, j]))
             
-            print(f'at ({l[i].solution_value()},{b[i].solution_value()})')
-        print(f'Number of bin used  :',int(sum(z[m].solution_value() for m in range(k))))
-        print('----------------Statistics----------------')
-        if status == pywraplp.Solver.OPTIMAL:
-            print('Status              : OPTIMAL')
-        else:
-            print('Status              : FEASIBLE')
+    # Non-overlapping constraints for items in the same bin
+    for i in range(n_items):
+        for k in range(i+1, n_items):
+            for j in range(n_bins):
+                # Big-M constraints for non-overlapping
+                a1 = solver.BoolVar(f"left_{i}_{k}_{j}")        
+                a2 = solver.BoolVar(f'below_{i}_{k}_{j}')        
+                a3 = solver.BoolVar(f'right_{i}_{k}_{j}')        
+                a4 = solver.BoolVar(f'above_{i}_{k}_{j}')
+                
+                # At least one separation must be true if both items are in bin j
+                solver.Add(a1 + a2 + a3 + a4 >= B[i, j] + B[k, j] - 1)
+                
+                # Define the separation constraints
+                solver.Add(x[i] + width[i] <= x[k] + M * (1 - a1))
+                solver.Add(y[i] + height[i] <= y[k] + M * (1 - a2))
+                solver.Add(x[k] + width[k] <= x[i] + M * (1 - a3))
+                solver.Add(y[k] + height[k] <= y[i] + M * (1 - a4))
+    
+    # Symmetry breaking constraints.
+    # [1] If two rectangles are identical then force a lexicographic order.
+    for i in range(n_items):
+        for j in range(i + 1, n_items):
+            if items[i] == items[j]:
+                solver.Add(x[i] <= x[j])
+                solver.Add(y[i] <= y[j])
+
+    # [2] For rectangles with the maximum width, restrict their horizontal domain.
+    for i, rect in enumerate(items):
+        wi, hi = rect
+        if wi == max_pack_width:
+            max_domain = (W - wi) // 2
+            solver.Add(x[i] <= max_domain)
+            
+    # Find which bin has been used               
+    for j in range(n_bins):
+        # Z[j] = 1 if any item is placed in bin j
+        for i in range(n_items):
+            solver.Add(Z[j] >= B[i, j])
+        solver.Add(Z[j] <= sum(B[i, j] for i in range(n_items)))
+
+    # Objective function
+    used = sum(Z[j] for j in range(n_bins))
+    solver.Minimize(used)
+    
+    # Set time limit
+    solver.SetTimeLimit(time_limit * 1000)  # Convert to milliseconds
+    
+    result_dict = {}
+    
+    # Solve
+    status = solver.Solve()
+    
+    # Print the results
+    print('----------------Given data----------------')
+    print(f'Number of pack given: {n_items}')
+    print(f'Number of bin given : {n_bins}')
+
+    if status == pywraplp.Solver.OPTIMAL or status == pywraplp.Solver.FEASIBLE:
+        print('--------------Solution Found--------------')
+
+        # Get solution values
+        for i in range(n_items):
+            for j in range(n_bins):
+                if B[i, j].solution_value() == 1:
+                    optimal_pos.append([int(x[i].solution_value()), int(y[i].solution_value()), j])
+            optimal_rot.append(int(R[i].solution_value()))
+
+        optimal_bins = int(sum(Z[j].solution_value() for j in range(n_bins)))
+        print(f'Number of bin used  : {optimal_bins}')
+        print(f'Status              : {"OPTIMAL" if status == pywraplp.Solver.OPTIMAL else "FEASIBLE"}')
         print(f'Time limit          : {time_limit}')
-        print(f'Running time        : {solver.WallTime() / 1000}')
-        for m in range(k):
-            if z[m].solution_value() == 1:
-                display_solution([W,H], [data['size_item'][i] for i in bins[m]], [pos[i] for i in bins[m]], [rotation[i] for i in bins[m]])
-        return n, int(sum(z[m].solution_value() for m in range(k))), format(solver.WallTime() / 1000, '.6f')
+        print(f'Running time        : {solver.WallTime() / 1000.0}')
+    
+        result_dict = {
+            'Instance': instance_name,
+            'Runtime': timeit.default_timer() - start,
+            'Optimal_Bins': optimal_bins,
+            'Status': "SUCCESS",
+            'Optimal': "YES" if status == pywraplp.Solver.OPTIMAL else "NO",
+        }
+        # display_solution_each_bin(W, H, items, optimal_pos, optimal_rot)
     else:
         print('NO SOLUTIONS')
-        return n, '-', format(solver.WallTime() / 1000, '.6f')
-    
-if __name__ == '__main__':
-    try:
-        # Get input file path
-        time_limit = int(sys.argv[2])
-    except IndexError:
-        time_limit = 100
-       
-    # Create solver
-    
-    file_path = f'input_data/BENG/BENG01.txt'
-    print("Reading file: ", file_path.split("/")[-1])
-    start = time.time()
-    n, n_bins, solver_time = main_solver(file_path, time_limit)
-    stop = time.time()
-    result_dict = {
-        "Type": "OR-Tools MIP",
-        "Data": file_path.split("/")[-1],
-        "Number of items": n,
-        "Bins": n_bins,  
-        "Solver time": solver_time,
-        "Real time": format(stop - start, '.6f')
-    }
+        result_dict = {
+            'Instance': instance_name,
+            'Runtime': timeit.default_timer() - start,
+            'Optimal_Bins': "-",
+            'Status': "NO SOLUTIONS",
+            'Optimal': "NO",
+        }
     write_to_xlsx(result_dict)
     
 
-
-
+if __name__ == "__main__":
+    try:
+        for i in range(1, 11):
+            file_path = f'inputs/class/cl_1_20_{i}.txt'
+            print("Reading file: ", file_path.split("/")[-1])
+            BPP_MIP(file_path, time_out)
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        sys.exit(1)
