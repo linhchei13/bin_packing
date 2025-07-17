@@ -6,3 +6,10 @@ e.py
 *.json
 /out
 *.xlsx
+/**/*.png
+/*.md
+*.txt
+/*.pyc
+/__pycache__/
+*.sh
+backup*/
