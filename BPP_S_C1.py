@@ -190,14 +190,59 @@ def run_with_runlim(command, timeout, memory_limit):
     runlim_cmd = f"./runlim --time-limit={timeout} {command}"
     logger.info(f"Running with runlim: {runlim_cmd}")
     
+    process = None
     try:
-        result = subprocess.run(runlim_cmd.split(), 
-                              capture_output=True, 
-                              text=True, 
-                              timeout=timeout + 60)
-        return result.returncode, result.stdout, result.stderr
+        # Use Popen for better process control
+        process = subprocess.Popen(runlim_cmd.split(), 
+                                 stdout=subprocess.PIPE, 
+                                 stderr=subprocess.PIPE, 
+                                 text=True,
+                                 preexec_fn=os.setsid)  # Create new process group
+        
+        # Wait for completion with timeout
+        stdout, stderr = process.communicate(timeout=timeout + 10)  # Add buffer time
+        returncode = process.returncode
+        
+        return returncode, stdout, stderr
+        
     except subprocess.TimeoutExpired:
+        logger.warning(f"Process timeout expired, terminating...")
+        if process:
+            try:
+                # Kill the entire process group
+                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                # Wait briefly for graceful termination
+                process.wait(timeout=5)
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                try:
+                    # Force kill if still running
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    process.wait(timeout=2)
+                except (ProcessLookupError, subprocess.TimeoutExpired):
+                    pass
         return 124, "", "Timeout"  # 124 is timeout exit code
+    
+    except Exception as e:
+        logger.error(f"Error running subprocess: {e}")
+        if process:
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                process.wait(timeout=2)
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        return 1, "", str(e)
+    
+    finally:
+        # Ensure process is cleaned up
+        if process and process.poll() is None:
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass
+
 
 def calculate_lower_bound(rectangles, W, H):
     """Calculate lower bound for number of bins needed"""
@@ -648,8 +693,8 @@ def solve_single_instance(instance_name, timeout=900):
         for file in [f'result_{instance_name}_{config_name}.json', f'checkpoint_{instance_name}_{config_name}.json']:
             if os.path.exists(file):
                 os.remove(file)
-        if optimal_bins > 0 and optimal_pos:
-            display_solution_each_bin(W, H, rectangles, optimal_pos, bins_used, instance_name)
+        # if optimal_bins > 0 and optimal_pos:
+        #     display_solution_each_bin(W, H, rectangles, optimal_pos, bins_used, instance_name)
         return result
         
     except Exception as e:
@@ -684,15 +729,214 @@ def controller_mode():
     
     # Default instances to process
     default_instances = [
-        "BENG01", "BENG02", "BENG03", "BENG04", "BENG05",
-        "BENG06", "BENG07", "BENG08", "BENG09", "BENG10"
+    # BENG instances (10 instances)
+    "BENG01", "BENG02", "BENG03", "BENG04", "BENG05",
+    "BENG06", "BENG07", "BENG08", "BENG09", "BENG10",
+    
+    # CLASS instances (500 instances)
+    # CL_1_20_x (10 instances)
+    "CL_1_20_1", "CL_1_20_2", "CL_1_20_3", "CL_1_20_4", "CL_1_20_5",
+    "CL_1_20_6", "CL_1_20_7", "CL_1_20_8", "CL_1_20_9", "CL_1_20_10",
+    
+    # CL_1_40_x (10 instances)
+    "CL_1_40_1", "CL_1_40_2", "CL_1_40_3", "CL_1_40_4", "CL_1_40_5",
+    "CL_1_40_6", "CL_1_40_7", "CL_1_40_8", "CL_1_40_9", "CL_1_40_10",
+    
+    # CL_1_60_x (10 instances)
+    "CL_1_60_1", "CL_1_60_2", "CL_1_60_3", "CL_1_60_4", "CL_1_60_5",
+    "CL_1_60_6", "CL_1_60_7", "CL_1_60_8", "CL_1_60_9", "CL_1_60_10",
+    
+    # CL_1_80_x (10 instances)
+    "CL_1_80_1", "CL_1_80_2", "CL_1_80_3", "CL_1_80_4", "CL_1_80_5",
+    "CL_1_80_6", "CL_1_80_7", "CL_1_80_8", "CL_1_80_9", "CL_1_80_10",
+    
+    # CL_1_100_x (10 instances)
+    "CL_1_100_1", "CL_1_100_2", "CL_1_100_3", "CL_1_100_4", "CL_1_100_5",
+    "CL_1_100_6", "CL_1_100_7", "CL_1_100_8", "CL_1_100_9", "CL_1_100_10",
+    
+    # CL_2_20_x (10 instances)
+    "CL_2_20_1", "CL_2_20_2", "CL_2_20_3", "CL_2_20_4", "CL_2_20_5",
+    "CL_2_20_6", "CL_2_20_7", "CL_2_20_8", "CL_2_20_9", "CL_2_20_10",
+    
+    # CL_2_40_x (10 instances)
+    "CL_2_40_1", "CL_2_40_2", "CL_2_40_3", "CL_2_40_4", "CL_2_40_5",
+    "CL_2_40_6", "CL_2_40_7", "CL_2_40_8", "CL_2_40_9", "CL_2_40_10",
+    
+    # CL_2_60_x (10 instances)
+    "CL_2_60_1", "CL_2_60_2", "CL_2_60_3", "CL_2_60_4", "CL_2_60_5",
+    "CL_2_60_6", "CL_2_60_7", "CL_2_60_8", "CL_2_60_9", "CL_2_60_10",
+    
+    # CL_2_80_x (10 instances)
+    "CL_2_80_1", "CL_2_80_2", "CL_2_80_3", "CL_2_80_4", "CL_2_80_5",
+    "CL_2_80_6", "CL_2_80_7", "CL_2_80_8", "CL_2_80_9", "CL_2_80_10",
+    
+    # CL_2_100_x (10 instances)
+    "CL_2_100_1", "CL_2_100_2", "CL_2_100_3", "CL_2_100_4", "CL_2_100_5",
+    "CL_2_100_6", "CL_2_100_7", "CL_2_100_8", "CL_2_100_9", "CL_2_100_10",
+    
+    # CL_3_20_x (10 instances)
+    "CL_3_20_1", "CL_3_20_2", "CL_3_20_3", "CL_3_20_4", "CL_3_20_5",
+    "CL_3_20_6", "CL_3_20_7", "CL_3_20_8", "CL_3_20_9", "CL_3_20_10",
+    
+    # CL_3_40_x (10 instances)
+    "CL_3_40_1", "CL_3_40_2", "CL_3_40_3", "CL_3_40_4", "CL_3_40_5",
+    "CL_3_40_6", "CL_3_40_7", "CL_3_40_8", "CL_3_40_9", "CL_3_40_10",
+    
+    # CL_3_60_x (10 instances)
+    "CL_3_60_1", "CL_3_60_2", "CL_3_60_3", "CL_3_60_4", "CL_3_60_5",
+    "CL_3_60_6", "CL_3_60_7", "CL_3_60_8", "CL_3_60_9", "CL_3_60_10",
+    
+    # CL_3_80_x (10 instances)
+    "CL_3_80_1", "CL_3_80_2", "CL_3_80_3", "CL_3_80_4", "CL_3_80_5",
+    "CL_3_80_6", "CL_3_80_7", "CL_3_80_8", "CL_3_80_9", "CL_3_80_10",
+    
+    # CL_3_100_x (10 instances)
+    "CL_3_100_1", "CL_3_100_2", "CL_3_100_3", "CL_3_100_4", "CL_3_100_5",
+    "CL_3_100_6", "CL_3_100_7", "CL_3_100_8", "CL_3_100_9", "CL_3_100_10",
+    
+    # CL_4_20_x (10 instances)
+    "CL_4_20_1", "CL_4_20_2", "CL_4_20_3", "CL_4_20_4", "CL_4_20_5",
+    "CL_4_20_6", "CL_4_20_7", "CL_4_20_8", "CL_4_20_9", "CL_4_20_10",
+    
+    # CL_4_40_x (10 instances)
+    "CL_4_40_1", "CL_4_40_2", "CL_4_40_3", "CL_4_40_4", "CL_4_40_5",
+    "CL_4_40_6", "CL_4_40_7", "CL_4_40_8", "CL_4_40_9", "CL_4_40_10",
+    
+    # CL_4_60_x (10 instances)
+    "CL_4_60_1", "CL_4_60_2", "CL_4_60_3", "CL_4_60_4", "CL_4_60_5",
+    "CL_4_60_6", "CL_4_60_7", "CL_4_60_8", "CL_4_60_9", "CL_4_60_10",
+    
+    # CL_4_80_x (10 instances)
+    "CL_4_80_1", "CL_4_80_2", "CL_4_80_3", "CL_4_80_4", "CL_4_80_5",
+    "CL_4_80_6", "CL_4_80_7", "CL_4_80_8", "CL_4_80_9", "CL_4_80_10",
+    
+    # CL_4_100_x (10 instances)
+    "CL_4_100_1", "CL_4_100_2", "CL_4_100_3", "CL_4_100_4", "CL_4_100_5",
+    "CL_4_100_6", "CL_4_100_7", "CL_4_100_8", "CL_4_100_9", "CL_4_100_10",
+    
+    # CL_5_20_x (10 instances)
+    "CL_5_20_1", "CL_5_20_2", "CL_5_20_3", "CL_5_20_4", "CL_5_20_5",
+    "CL_5_20_6", "CL_5_20_7", "CL_5_20_8", "CL_5_20_9", "CL_5_20_10",
+    
+    # CL_5_40_x (10 instances)
+    "CL_5_40_1", "CL_5_40_2", "CL_5_40_3", "CL_5_40_4", "CL_5_40_5",
+    "CL_5_40_6", "CL_5_40_7", "CL_5_40_8", "CL_5_40_9", "CL_5_40_10",
+    
+    # CL_5_60_x (10 instances)
+    "CL_5_60_1", "CL_5_60_2", "CL_5_60_3", "CL_5_60_4", "CL_5_60_5",
+    "CL_5_60_6", "CL_5_60_7", "CL_5_60_8", "CL_5_60_9", "CL_5_60_10",
+    
+    # CL_5_80_x (10 instances)
+    "CL_5_80_1", "CL_5_80_2", "CL_5_80_3", "CL_5_80_4", "CL_5_80_5",
+    "CL_5_80_6", "CL_5_80_7", "CL_5_80_8", "CL_5_80_9", "CL_5_80_10",
+    
+    # CL_5_100_x (10 instances)
+    "CL_5_100_1", "CL_5_100_2", "CL_5_100_3", "CL_5_100_4", "CL_5_100_5",
+    "CL_5_100_6", "CL_5_100_7", "CL_5_100_8", "CL_5_100_9", "CL_5_100_10",
+    
+    # CL_6_20_x (10 instances)
+    "CL_6_20_1", "CL_6_20_2", "CL_6_20_3", "CL_6_20_4", "CL_6_20_5",
+    "CL_6_20_6", "CL_6_20_7", "CL_6_20_8", "CL_6_20_9", "CL_6_20_10",
+    
+    # CL_6_40_x (10 instances)
+    "CL_6_40_1", "CL_6_40_2", "CL_6_40_3", "CL_6_40_4", "CL_6_40_5",
+    "CL_6_40_6", "CL_6_40_7", "CL_6_40_8", "CL_6_40_9", "CL_6_40_10",
+    
+    # CL_6_60_x (10 instances)
+    "CL_6_60_1", "CL_6_60_2", "CL_6_60_3", "CL_6_60_4", "CL_6_60_5",
+    "CL_6_60_6", "CL_6_60_7", "CL_6_60_8", "CL_6_60_9", "CL_6_60_10",
+    
+    # CL_6_80_x (10 instances)
+    "CL_6_80_1", "CL_6_80_2", "CL_6_80_3", "CL_6_80_4", "CL_6_80_5",
+    "CL_6_80_6", "CL_6_80_7", "CL_6_80_8", "CL_6_80_9", "CL_6_80_10",
+    
+    # CL_6_100_x (10 instances)
+    "CL_6_100_1", "CL_6_100_2", "CL_6_100_3", "CL_6_100_4", "CL_6_100_5",
+    "CL_6_100_6", "CL_6_100_7", "CL_6_100_8", "CL_6_100_9", "CL_6_100_10",
+    
+    # CL_7_20_x (10 instances)
+    "CL_7_20_1", "CL_7_20_2", "CL_7_20_3", "CL_7_20_4", "CL_7_20_5",
+    "CL_7_20_6", "CL_7_20_7", "CL_7_20_8", "CL_7_20_9", "CL_7_20_10",
+    
+    # CL_7_40_x (10 instances)
+    "CL_7_40_1", "CL_7_40_2", "CL_7_40_3", "CL_7_40_4", "CL_7_40_5",
+    "CL_7_40_6", "CL_7_40_7", "CL_7_40_8", "CL_7_40_9", "CL_7_40_10",
+    
+    # CL_7_60_x (10 instances)
+    "CL_7_60_1", "CL_7_60_2", "CL_7_60_3", "CL_7_60_4", "CL_7_60_5",
+    "CL_7_60_6", "CL_7_60_7", "CL_7_60_8", "CL_7_60_9", "CL_7_60_10",
+    
+    # CL_7_80_x (10 instances)
+    "CL_7_80_1", "CL_7_80_2", "CL_7_80_3", "CL_7_80_4", "CL_7_80_5",
+    "CL_7_80_6", "CL_7_80_7", "CL_7_80_8", "CL_7_80_9", "CL_7_80_10",
+    
+    # CL_7_100_x (10 instances)
+    "CL_7_100_1", "CL_7_100_2", "CL_7_100_3", "CL_7_100_4", "CL_7_100_5",
+    "CL_7_100_6", "CL_7_100_7", "CL_7_100_8", "CL_7_100_9", "CL_7_100_10",
+    
+    # CL_8_20_x (10 instances)
+    "CL_8_20_1", "CL_8_20_2", "CL_8_20_3", "CL_8_20_4", "CL_8_20_5",
+    "CL_8_20_6", "CL_8_20_7", "CL_8_20_8", "CL_8_20_9", "CL_8_20_10",
+    
+    # CL_8_40_x (10 instances)
+    "CL_8_40_1", "CL_8_40_2", "CL_8_40_3", "CL_8_40_4", "CL_8_40_5",
+    "CL_8_40_6", "CL_8_40_7", "CL_8_40_8", "CL_8_40_9", "CL_8_40_10",
+    
+    # CL_8_60_x (10 instances)
+    "CL_8_60_1", "CL_8_60_2", "CL_8_60_3", "CL_8_60_4", "CL_8_60_5",
+    "CL_8_60_6", "CL_8_60_7", "CL_8_60_8", "CL_8_60_9", "CL_8_60_10",
+    
+    # CL_8_80_x (10 instances)
+    "CL_8_80_1", "CL_8_80_2", "CL_8_80_3", "CL_8_80_4", "CL_8_80_5",
+    "CL_8_80_6", "CL_8_80_7", "CL_8_80_8", "CL_8_80_9", "CL_8_80_10",
+    
+    # CL_8_100_x (10 instances)
+    "CL_8_100_1", "CL_8_100_2", "CL_8_100_3", "CL_8_100_4", "CL_8_100_5",
+    "CL_8_100_6", "CL_8_100_7", "CL_8_100_8", "CL_8_100_9", "CL_8_100_10",
+    
+    # CL_9_20_x (10 instances)
+    "CL_9_20_1", "CL_9_20_2", "CL_9_20_3", "CL_9_20_4", "CL_9_20_5",
+    "CL_9_20_6", "CL_9_20_7", "CL_9_20_8", "CL_9_20_9", "CL_9_20_10",
+    
+    # CL_9_40_x (10 instances)
+    "CL_9_40_1", "CL_9_40_2", "CL_9_40_3", "CL_9_40_4", "CL_9_40_5",
+    "CL_9_40_6", "CL_9_40_7", "CL_9_40_8", "CL_9_40_9", "CL_9_40_10",
+    
+    # CL_9_60_x (10 instances)
+    "CL_9_60_1", "CL_9_60_2", "CL_9_60_3", "CL_9_60_4", "CL_9_60_5",
+    "CL_9_60_6", "CL_9_60_7", "CL_9_60_8", "CL_9_60_9", "CL_9_60_10",
+    
+    # CL_9_80_x (10 instances)
+    "CL_9_80_1", "CL_9_80_2", "CL_9_80_3", "CL_9_80_4", "CL_9_80_5",
+    "CL_9_80_6", "CL_9_80_7", "CL_9_80_8", "CL_9_80_9", "CL_9_80_10",
+    
+    # CL_9_100_x (10 instances)
+    "CL_9_100_1", "CL_9_100_2", "CL_9_100_3", "CL_9_100_4", "CL_9_100_5",
+    "CL_9_100_6", "CL_9_100_7", "CL_9_100_8", "CL_9_100_9", "CL_9_100_10",
+    
+    # CL_10_20_x (10 instances)
+    "CL_10_20_1", "CL_10_20_2", "CL_10_20_3", "CL_10_20_4", "CL_10_20_5",
+    "CL_10_20_6", "CL_10_20_7", "CL_10_20_8", "CL_10_20_9", "CL_10_20_10",
+    
+    # CL_10_40_x (10 instances)
+    "CL_10_40_1", "CL_10_40_2", "CL_10_40_3", "CL_10_40_4", "CL_10_40_5",
+    "CL_10_40_6", "CL_10_40_7", "CL_10_40_8", "CL_10_40_9", "CL_10_40_10",
+    
+    # CL_10_60_x (10 instances)
+    "CL_10_60_1", "CL_10_60_2", "CL_10_60_3", "CL_10_60_4", "CL_10_60_5",
+    "CL_10_60_6", "CL_10_60_7", "CL_10_60_8", "CL_10_60_9", "CL_10_60_10",
+    
+    # CL_10_80_x (10 instances)
+    "CL_10_80_1", "CL_10_80_2", "CL_10_80_3", "CL_10_80_4", "CL_10_80_5",
+    "CL_10_80_6", "CL_10_80_7", "CL_10_80_8", "CL_10_80_9", "CL_10_80_10",
+    
+    # CL_10_100_x (10 instances)
+    "CL_10_100_1", "CL_10_100_2", "CL_10_100_3", "CL_10_100_4", "CL_10_100_5",
+    "CL_10_100_6", "CL_10_100_7", "CL_10_100_8", "CL_10_100_9", "CL_10_100_10"
     ]
     
     # Load instance list from file if exists
     instances_to_process = default_instances
-    if os.path.exists("all_instances.txt"):
-        with open("all_instances.txt", 'r') as f:
-            instances_to_process = [line.strip() for line in f if line.strip()]
     
     # Read existing Excel file to check completed instances
     excel_file = f'{config_name}.xlsx'
@@ -723,8 +967,8 @@ def controller_mode():
         try:
             # Run with runlim if available
             if os.path.exists('./runlim'):
-                script_path = os.path.abspath(__file__)
-                command = f"python {script_path} {instance_name}"
+                script_path = os.path.basename(__file__)
+                command = f"python3 {script_path} {instance_name}"
                 exit_code, stdout, stderr = run_with_runlim(command, timeout=TIMEOUT, memory_limit=8192)
                 
                 if exit_code == 0:

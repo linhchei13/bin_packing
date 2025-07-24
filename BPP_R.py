@@ -39,7 +39,7 @@ def handle_interrupt(signum, frame):
     }
     
 
-    with open(f'results_{instance_id}.json', 'w') as f:
+    with open(f'results_BPP_R_{instance_id}.json', 'w') as f:
         json.dump(result, f)
     # display_solution(bin_width, bin_height, rectangles, best_solution[0], best_solution[1], best_rotations, instances[instance_id])
     sys.exit(0)
@@ -421,7 +421,7 @@ def save_checkpoint(instance_id, variables, clauses, num_bins, status="IN_PROGRE
         'Status': status
     }
     
-    with open(f'checkpoint_{instance_id}.json', 'w') as f:
+    with open(f'checkpoint_BPP_R_{instance_id}.json', 'w') as f:
         json.dump(checkpoint, f)
 
 def OPP(rectangles, max_bins, bin_width, bin_height):
@@ -940,7 +940,7 @@ if __name__ == "__main__":
             print(f"{'=' * 50}")
             
             # Clean up previous result files
-            for temp_file in [f'results_{instance_id}.json', f'checkpoint_{instance_id}.json']:
+            for temp_file in [f'results_BPP_R_{instance_id}.json', f'checkpoint_BPP_R_{instance_id}.json']:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
             
@@ -955,11 +955,11 @@ if __name__ == "__main__":
                 # Check results
                 result = None
                 
-                if os.path.exists(f'results_{instance_id}.json'):
-                    with open(f'results_{instance_id}.json', 'r') as f:
+                if os.path.exists(f'results_BPP_R_{instance_id}.json'):
+                    with open(f'results_BPP_R_{instance_id}.json', 'r') as f:
                         result = json.load(f)
-                elif os.path.exists(f'checkpoint_{instance_id}.json'):
-                    with open(f'checkpoint_{instance_id}.json', 'r') as f:
+                elif os.path.exists(f'checkpoint_BPP_R_{instance_id}.json'):
+                    with open(f'checkpoint_BPP_R_{instance_id}.json', 'r') as f:
                         result = json.load(f)
                     result['Status'] = 'TIMEOUT'
                     result['Instance'] = instance_name
@@ -994,7 +994,7 @@ if __name__ == "__main__":
                 print(f"Error running instance {instance_name}: {str(e)}")
             
             # Clean up temp files
-            for temp_file in [f'results_{instance_id}.json', f'checkpoint_{instance_id}.json']:
+            for temp_file in [f'results_BPP_R_{instance_id}.json', f'checkpoint_BPP_R_{instance_id}.json']:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
         
@@ -1043,9 +1043,9 @@ if __name__ == "__main__":
             runtime = stop - start
             
             # Display solution
-            if optimal_solution:
-                bins_assignment, positions = optimal_solution
-                display_solution(bin_width, bin_height, rectangles, bins_assignment, positions, optimal_rotations, instance_name)
+            # if optimal_solution:
+            #     bins_assignment, positions = optimal_solution
+            #     display_solution(bin_width, bin_height, rectangles, bins_assignment, positions, optimal_rotations, instance_name)
             
             # Create result
             result = {
@@ -1080,7 +1080,7 @@ if __name__ == "__main__":
             print(f"Results saved to {excel_file}")
             
             # Save JSON result for controller
-            with open(f'results_{instance_id}.json', 'w') as f:
+            with open(f'results_BPP_R_{instance_id}.json', 'w') as f:
                 json.dump(result, f)
             
             print(f"Instance {instance_name} completed - Runtime: {runtime:.2f}s, Bins: {optimal_bins}")
@@ -1119,5 +1119,5 @@ if __name__ == "__main__":
             existing_df.to_excel(excel_file, index=False)
             print(f"Error results saved to {excel_file}")
             
-            with open(f'results_{instance_id}.json', 'w') as f:
+            with open(f'results_BPP_R_{instance_id}.json', 'w') as f:
                 json.dump(result, f)

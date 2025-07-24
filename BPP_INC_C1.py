@@ -37,7 +37,7 @@ def handle_interrupt(signum, frame):
         'Status': 'TIMEOUT'
     }
     
-    with open(f'results_{instance_id}.json', 'w') as f:
+    with open(f'results_BPP_INC_C1_{instance_id}.json', 'w') as f:
         json.dump(result, f)
     
     sys.exit(0)
@@ -416,7 +416,7 @@ def save_checkpoint(instance_id, variables, clauses, num_bins, status="IN_PROGRE
         'Status': status
     }
     
-    with open(f'checkpoint_{instance_id}.json', 'w') as f:
+    with open(f'checkpoint_BPP_INC_C1_{instance_id}.json', 'w') as f:
         json.dump(checkpoint, f)
 
 def OPP(rectangles, upper_bound, bin_width, bin_height):
@@ -895,20 +895,20 @@ if __name__ == "__main__":
         TIMEOUT = 900  
         
         # Start from instance 1 (skip index 0 which is empty)
-        for instance_id in range(97, len(instances)):
+        for instance_id in range(1, len(instances)):
             instance_name = instances[instance_id]
             
             # Skip if already completed
-            # if instance_name in completed_instances:
-            #     print(f"\nSkipping instance {instance_id}: {instance_name} (already completed)")
-            #     continue
+            if instance_name in completed_instances:
+                print(f"\nSkipping instance {instance_id}: {instance_name} (already completed)")
+                continue
                 
             print(f"\n{'=' * 50}")
             print(f"Running instance {instance_id}: {instance_name}")
             print(f"{'=' * 50}")
             
             # Clean up previous result files
-            for temp_file in [f'results_{instance_id}.json', f'checkpoint_{instance_id}.json']:
+            for temp_file in [f'results_BPP_INC_C1_{instance_id}.json', f'checkpoint_BPP_INC_C1_{instance_id}.json']:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
             
@@ -923,11 +923,11 @@ if __name__ == "__main__":
                 # Check results
                 result = None
                 
-                if os.path.exists(f'results_{instance_id}.json'):
-                    with open(f'results_{instance_id}.json', 'r') as f:
+                if os.path.exists(f'results_BPP_INC_C1_{instance_id}.json'):
+                    with open(f'results_BPP_INC_C1_{instance_id}.json', 'r') as f:
                         result = json.load(f)
-                elif os.path.exists(f'checkpoint_{instance_id}.json'):
-                    with open(f'checkpoint_{instance_id}.json', 'r') as f:
+                elif os.path.exists(f'checkpoint_BPP_INC_C1_{instance_id}.json'):
+                    with open(f'checkpoint_BPP_INC_C1_{instance_id}.json', 'r') as f:
                         result = json.load(f)
                     result['Status'] = 'TIMEOUT'
                     result['Instance'] = instance_name
@@ -963,7 +963,7 @@ if __name__ == "__main__":
                 print(f"Error running instance {instance_name}: {str(e)}")
             
             # Clean up temp files
-            for temp_file in [f'results_{instance_id}.json', f'checkpoint_{instance_id}.json']:
+            for temp_file in [f'results_BPP_INC_C1_{instance_id}.json', f'checkpoint_BPP_INC_C1_{instance_id}.json']:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
         
@@ -1050,7 +1050,7 @@ if __name__ == "__main__":
             print(f"Results saved to {excel_file}")
             
             # Save JSON result for controller
-            with open(f'results_{instance_id}.json', 'w') as f:
+            with open(f'results_BPP_INC_C1_{instance_id}.json', 'w') as f:
                 json.dump(result, f)
             
             print(f"Instance {instance_name} completed - Runtime: {runtime:.2f}s, Bins: {optimal_bins}")
@@ -1089,5 +1089,5 @@ if __name__ == "__main__":
             existing_df.to_excel(excel_file, index=False)
             print(f"Error results saved to {excel_file}")
             
-            with open(f'results_{instance_id}.json', 'w') as f:
+            with open(f'results_BPP_INC_C1_{instance_id}.json', 'w') as f:
                 json.dump(result, f)

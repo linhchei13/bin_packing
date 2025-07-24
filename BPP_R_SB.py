@@ -21,16 +21,17 @@ variables_length = 0
 clauses_length = 0
 upper_bound = 0
 
-# Signal handler for graceful interruption
+# Signal handler for graceful interruption (e.g., by runlim)
 def handle_interrupt(signum, frame):
     print(f"\nReceived interrupt signal {signum}. Saving current best solution.")
     
+    # Get the best number of bins (either found value or upper_bound)
     current_bins = best_num_bins if best_num_bins != float('inf') else upper_bound
     print(f"Best number of bins found before interrupt: {current_bins}")
     
     # Save result as JSON for the controller to pick up
     result = {
-        'Instance': instances[instance_id],
+        'Instance': instances[instance_id],  # Add instance name
         'Variables': variables_length,
         'Clauses': clauses_length,
         'Runtime': timeit.default_timer() - start,
@@ -38,14 +39,15 @@ def handle_interrupt(signum, frame):
         'Status': 'TIMEOUT'
     }
     
-    with open(f'results_{instance_id}.json', 'w') as f:
+    with open(f'results_BPP_R_SB_{instance_id}.json', 'w') as f:
         json.dump(result, f)
     
-    sys.exit(0)
+    sys.exit(0)  
 
 # Register signal handlers
-signal.signal(signal.SIGTERM, handle_interrupt)
-signal.signal(signal.SIGINT, handle_interrupt)
+signal.signal(signal.SIGTERM, handle_interrupt)  # Termination signal
+signal.signal(signal.SIGINT, handle_interrupt)   # Keyboard interrupt (Ctrl+C)
+
 
 # Create BPP_R_SB folder if it doesn't exist
 if not os.path.exists('BPP_R_SB'):
@@ -421,8 +423,10 @@ def save_checkpoint(instance_id, variables, clauses, num_bins, status="IN_PROGRE
         'Status': status
     }
     
-    with open(f'checkpoint_{instance_id}.json', 'w') as f:
+    print(f"Checkpoint saved for instance {instances[instance_id]} with {len(variables)} variables and {len(clauses)} clauses.")
+    with open(f'checkpoint_BPP_R_SB_{instance_id}.json', 'w') as f:
         json.dump(checkpoint, f)
+    
 
 def OPP(rectangles, max_bins, bin_width, bin_height):
     """Solve 2D Bin Packing with given number of bins and rotation"""
@@ -957,7 +961,7 @@ if __name__ == "__main__":
     "CL_10_100_6", "CL_10_100_7", "CL_10_100_8", "CL_10_100_9", "CL_10_100_10"
 ]
         else:
-                completed_instances = []
+            completed_instances = []
         
         # Set timeout
         TIMEOUT = 900 
@@ -976,7 +980,7 @@ if __name__ == "__main__":
             print(f"{'=' * 50}")
             
             # Clean up temp files
-            for temp_file in [f'results_{instance_id}.json', f'checkpoint_{instance_id}.json']:
+            for temp_file in [f'results_BPP_R_SB_{instance_id}.json', f'checkpoint_BPP_R_SB_{instance_id}.json']:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
             # Run instance with runlim
@@ -990,11 +994,11 @@ if __name__ == "__main__":
                 # Check results
                 result = None
                 
-                if os.path.exists(f'results_{instance_id}.json'):
-                    with open(f'results_{instance_id}.json', 'r') as f:
+                if os.path.exists(f'results_BPP_R_SB_{instance_id}.json'):
+                    with open(f'results_BPP_R_SB_{instance_id}.json', 'r') as f:
                         result = json.load(f)
-                elif os.path.exists(f'checkpoint_{instance_id}.json'):
-                    with open(f'checkpoint_{instance_id}.json', 'r') as f:
+                elif os.path.exists(f'checkpoint_BPP_R_SB_{instance_id}.json'):
+                    with open(f'checkpoint_BPP_R_SB_{instance_id}.json', 'r') as f:
                         result = json.load(f)
                     result['Status'] = 'TIMEOUT'
                     result['Instance'] = instance_name
@@ -1030,7 +1034,7 @@ if __name__ == "__main__":
                 print(f"Error running instance {instance_name}: {str(e)}")
             
             # Clean up temp files
-            for temp_file in [f'results_{instance_id}.json', f'checkpoint_{instance_id}.json']:
+            for temp_file in [f'results_BPP_R_SB_{instance_id}.json', f'checkpoint_BPP_R_SB_{instance_id}.json']:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
         
@@ -1079,9 +1083,9 @@ if __name__ == "__main__":
             runtime = stop - start
             
             # Display solution
-            if optimal_solution:
-                bins_assignment, positions = optimal_solution
-                display_solution(bin_width, bin_height, rectangles, bins_assignment, positions, optimal_rotations, instance_name)
+            # if optimal_solution:
+            #     bins_assignment, positions = optimal_solution
+            #     display_solution(bin_width, bin_height, rectangles, bins_assignment, positions, optimal_rotations, instance_name)
             
             # Create result
             result = {
@@ -1116,7 +1120,7 @@ if __name__ == "__main__":
             print(f"Results saved to {excel_file}")
             
             # Save JSON result for controller
-            with open(f'results_{instance_id}.json', 'w') as f:
+            with open(f'results_BPP_R_SB_{instance_id}.json', 'w') as f:
                 json.dump(result, f)
             
             print(f"Instance {instance_name} completed - Runtime: {runtime:.2f}s, Bins: {optimal_bins}")
@@ -1155,5 +1159,5 @@ if __name__ == "__main__":
             existing_df.to_excel(excel_file, index=False)
             print(f"Error results saved to {excel_file}")
             
-            with open(f'results_{instance_id}.json', 'w') as f:
+            with open(f'results_BPP_R_SB_{instance_id}.json', 'w') as f:
                 json.dump(result, f)

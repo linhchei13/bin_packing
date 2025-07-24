@@ -13,3 +13,4 @@ e.py
 /__pycache__/
 *.sh
 backup*/
+venv/

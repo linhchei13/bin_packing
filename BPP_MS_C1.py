@@ -6,6 +6,7 @@ import json
 import subprocess
 import time
 import tempfile
+import glob
 import matplotlib.pyplot as plt
 import timeit
 import pandas as pd
@@ -17,6 +18,7 @@ best_solution = None
 variables_length = 0
 clauses_length = 0
 upper_bound = 0
+wcnf_file = ""  # Global variable to store the WCNF file name
 
 # Signal handler for graceful interruption
 def handle_interrupt(signum, frame):
@@ -35,7 +37,7 @@ def handle_interrupt(signum, frame):
         'Status': 'TIMEOUT'
     }
     
-    with open(f'results_{instance_id}.json', 'w') as f:
+    with open(f'results_BPP_MS_C1_{instance_id}.json', 'w') as f:
         json.dump(result, f)
     
     sys.exit(0)
@@ -411,12 +413,12 @@ def save_checkpoint(instance_id, variables, clauses, bins, status="IN_PROGRESS")
         'Status': status
     }
     
-    with open(f'checkpoint_{instance_id}.json', 'w') as f:
+    with open(f'checkpoint_BPP_MS_C1_{instance_id}.json', 'w') as f:
         json.dump(checkpoint, f)
 
 def BPP_MaxSAT(rectangles, lower_bound, upper_bound, bin_width, bin_height):
     """Solve 2D Bin Packing using Max-SAT approach with tt-open-wbo-inc"""
-    global variables_length, clauses_length, best_num_bins, best_solution
+    global variables_length, clauses_length, best_num_bins, best_solution, wcnf_file
     n_rectangles = len(rectangles)
     variables = {}
     counter = 1
@@ -424,7 +426,7 @@ def BPP_MaxSAT(rectangles, lower_bound, upper_bound, bin_width, bin_height):
     # Create a temporary file for the Max-SAT formula
     with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.wcnf') as file:
         wcnf_file = file.name
-        
+        print(f"Writing to temporary file: {wcnf_file}")
         # Add comments for clarity
         file.write(f"c 2D Bin Packing Problem, Bin={bin_width}x{bin_height}, n={n_rectangles}\n")
         file.write(f"c Lower bound={lower_bound}, Upper bound={upper_bound}\n")
@@ -599,7 +601,7 @@ def BPP_MaxSAT(rectangles, lower_bound, upper_bound, bin_width, bin_height):
         soft_clauses = []
         
         # We want to minimize the number of used bins
-        for b in range(1, upper_bound + 1):
+        for b in range(lower_bound + 1, upper_bound + 1):
             soft_clauses.append((1, [-variables[f"b_{b}"]]))  # Penalize using bin b (negative to minimize)
         
         # Require at least lower_bound bins to be used (ensures valid solution)
@@ -695,11 +697,13 @@ def BPP_MaxSAT(rectangles, lower_bound, upper_bound, bin_width, bin_height):
                         best_num_bins = lower_bound
                     
                     # Extract item assignments
+                    # Extract item assignments
+                    bins_assignment = [[] for _ in range(upper_bound)]
                     for i in range(n_rectangles):
                         for b in range(upper_bound):
                             var_key = f"x{i + 1},{b + 1}"
                             if var_key in variables and variables[var_key] in true_vars:
-                                bins_assignment[b + 1].append(i)
+                                bins_assignment[b].append(i)
                                 break
                     
                     # Extract positions
@@ -727,15 +731,16 @@ def BPP_MaxSAT(rectangles, lower_bound, upper_bound, bin_width, bin_height):
         else:
             print("No optimal solution found.")
             print(f"Solver output: {output}")
+            return None, None
         
         # Clean up the temporary file
-        os.unlink(wcnf_file)
+        os.remove(wcnf_file)
         return optimal_bins, (bins_assignment, positions) if best_solution else None
     
     except Exception as e:
         print(f"Error running Max-SAT solver: {e}")
         if os.path.exists(wcnf_file):
-            os.unlink(wcnf_file)
+            os.remove(wcnf_file)
         return None, None
 
 if __name__ == "__main__":
@@ -773,12 +778,11 @@ if __name__ == "__main__":
             print(f"{'=' * 50}")
             
             # Clean up any previous result file
-            if os.path.exists(f'results_{instance_id}.json'):
-                os.remove(f'results_{instance_id}.json')
+            if os.path.exists(f'results_BPP_MS_C1_{instance_id}.json'):
+                os.remove(f'results_BPP_MS_C1_{instance_id}.json')
             
             # Run the instance with runlim
             command = f"./runlim -r {TIMEOUT} python3 BPP_MS_C1.py {instance_id}"
-            
             try:
                 process = subprocess.Popen(command, shell=True)
                 process.wait()
@@ -788,13 +792,13 @@ if __name__ == "__main__":
                 result = None
                 
                 # Try to read results file first
-                if os.path.exists(f'results_{instance_id}.json'):
-                    with open(f'results_{instance_id}.json', 'r') as f:
+                if os.path.exists(f'results_BPP_MS_C1_{instance_id}.json'):
+                    with open(f'results_BPP_MS_C1_{instance_id}.json', 'r') as f:
                         result = json.load(f)
                 
                 # If no results file, check checkpoint
-                elif os.path.exists(f'checkpoint_{instance_id}.json'):
-                    with open(f'checkpoint_{instance_id}.json', 'r') as f:
+                elif os.path.exists(f'checkpoint_BPP_MS_C1_{instance_id}.json'):
+                    with open(f'checkpoint_BPP_MS_C1_{instance_id}.json', 'r') as f:
                         result = json.load(f)
                     result['Status'] = 'TIMEOUT'
                     result['Instance'] = instance_name
@@ -833,12 +837,29 @@ if __name__ == "__main__":
             except Exception as e:
                 print(f"Error running instance {instance_name}: {str(e)}")
             
-            # Clean up result files
-            for file in [f'results_{instance_id}.json', f'checkpoint_{instance_id}.json']:
+            # Clean up result files and temporary WCNF files
+            for file in [f'results_BPP_MS_C1_{instance_id}.json', f'checkpoint_BPP_MS_C1_{instance_id}.json']:
                 if os.path.exists(file):
                     os.remove(file)
+            
+            # Clean up any temporary WCNF files that might be left behind
+            import glob
+            temp_wcnf_files = glob.glob('/tmp/tmp*.wcnf')
+            for temp_file in temp_wcnf_files:
+                try:
+                    # Only remove files that are older than 1 minute to avoid removing active files
+                    if os.path.exists(temp_file):
+                        file_age = time.time() - os.path.getmtime(temp_file)
+                        if file_age >= 900:  
+                            os.remove(temp_file)
+                            print(f"Cleaned up temporary file: {temp_file}")
+                except Exception as cleanup_error:
+                    # Silently ignore cleanup errors
+                    pass
         
         print(f"\nAll test instances completed. Results saved to {excel_file}")
+        
+       
     
     # Single instance mode
     else:
@@ -900,7 +921,7 @@ if __name__ == "__main__":
                 'Clauses': clauses_length,
                 'Runtime': runtime,
                 'Optimal_Bins': final_bins,
-                'Status': 'COMPLETE'
+                'Status': 'COMPLETE' if optimal_bins else 'ERROR'
             }
             
             # Save to Excel
@@ -926,7 +947,7 @@ if __name__ == "__main__":
             print(f"Results saved to {excel_file}")
             
             # Save JSON result for controller
-            with open(f'results_{instance_id}.json', 'w') as f:
+            with open(f'results_BPP_MS_C1_{instance_id}.json', 'w') as f:
                 json.dump(result, f)
             
             print(f"Instance {instance_name} completed - Runtime: {runtime:.2f}s, Bins: {final_bins}")
@@ -966,5 +987,8 @@ if __name__ == "__main__":
             existing_df.to_excel(excel_file, index=False)
             print(f"Error results saved to {excel_file}")
             
-            with open(f'results_{instance_id}.json', 'w') as f:
+            with open(f'results_BPP_MS_C1_{instance_id}.json', 'w') as f:
                 json.dump(result, f)
+        for file in [f'results_BPP_MS_C1_{instance_id}.json', f'checkpoint_BPP_MS_C1_{instance_id}.json']:
+            if os.path.exists(file):
+                os.remove(file)

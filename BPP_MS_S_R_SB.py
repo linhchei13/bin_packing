@@ -40,7 +40,7 @@ def handle_interrupt(signum, frame):
         'Status': 'TIMEOUT'
     }
     
-    with open(f'results_{instance_id}.json', 'w') as f:
+    with open(f'results_BPP_MS_S_R_SB_{instance_id}.json', 'w') as f:
         json.dump(result, f)
     
     sys.exit(0)  
@@ -111,6 +111,80 @@ def display_solution(bin_width, bin_height, rectangles, bins_assignment, positio
     plt.tight_layout()
     plt.savefig(f'BPP_MS_S_R_SB/{instance_name}.png', dpi=150, bbox_inches='tight')
     plt.close()
+
+def display_solution_each_bin(W, H, rectangles, positions, rotated, bins_used):
+    """Display all bins in one window with subplots"""
+    import numpy as np
+    # Use the new colormap API for compatibility
+    n_bins = len(bins_used)
+    ncols = min(n_bins, 4)
+    nrows = (n_bins + ncols - 1) // ncols
+    plt.title(f'Solution for {instance_name}')
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 6 * nrows))
+    fig.suptitle(f'Solution for {instance_name}  - {n_bins} bins', fontsize=16)
+    # Handle different subplot configurations
+    if n_bins == 1:
+        axes = np.array([[axes]])
+    elif nrows == 1:
+        axes = np.array([axes])
+    elif ncols == 1:
+        axes = np.array([[ax] for ax in axes])
+    
+    axes = axes.flatten()
+    
+    for bin_idx, items_in_bin in enumerate(bins_used):
+        ax = axes[bin_idx]
+        ax.set_title(f'Bin {bin_idx + 1}')
+        ax.set_xlim(0, W)
+        ax.set_ylim(0, H)
+        ax.set_aspect('equal')
+        
+        # Draw rectangles for items in this bin
+        for item_idx in items_in_bin:
+            #rotated = rotations[item_idx]
+            if rotated[item_idx]:
+                w, h = rectangles[item_idx][1], rectangles[item_idx][0]
+            else:
+                w, h = rectangles[item_idx]
+            # For incremental approach, positions contain bin-relative coordinates
+            if len(positions[item_idx]) >= 2:
+                x0, y0 = positions[item_idx][0], positions[item_idx][1]
+            else:
+                continue
+            
+            rect_patch = plt.Rectangle((x0, y0), w, h, 
+                                     edgecolor='black', 
+                                     facecolor="lightblue", 
+                                     alpha=0.7)
+            ax.add_patch(rect_patch)
+            
+            # Add item number in the center
+            cx, cy = x0 + w/2, y0 + h/2
+            
+            
+            ax.text(cx, cy, f'{item_idx + 1}', 
+                   ha='center', va='center', 
+                    fontweight='bold', fontsize=8)
+        
+        # Set grid and ticks
+        ax.set_xticks(range(0, W+1, max(1, W//10)))
+        ax.set_yticks(range(0, H+1, max(1, H//10)))
+        ax.grid(True, linestyle='--', alpha=0.3)
+    
+    # Hide unused subplots
+    for j in range(n_bins, len(axes)):
+        axes[j].axis('off')
+    
+    plt.tight_layout()
+    
+    # Save plot instead of showing for better compatibility
+    try:
+        plt.savefig(f'BPP_MS_S_R_SB/{instance_name}_solution.png', dpi=150, bbox_inches='tight')
+        plt.close()
+    except Exception as e:
+        print(f"Could not save plot: {e}")
+  
 
 def read_file_instance(instance_name):
     """Read instance file based on instance name"""
@@ -462,7 +536,7 @@ def save_checkpoint(instance_id, variables, clauses, bins, status="IN_PROGRESS")
         'Status': status
     }
     
-    with open(f'checkpoint_{instance_id}.json', 'w') as f:
+    with open(f'checkpoint_BPP_MS_S_R_SB_{instance_id}.json', 'w') as f:
         json.dump(checkpoint, f)
 
 def BPP_MaxSat(W, H, lower_bound, upper_bound):
@@ -756,8 +830,9 @@ def BPP_MaxSat(W, H, lower_bound, upper_bound):
         else:
             print("No optimal solution found.")
             print(f"Solver output: {output}")
+            return None, None, None
         import os
-        os.unlink(wcnf_file)
+        os.remove(wcnf_file)
         return bins_used, positions, rotations
     except Exception as e:
         print(f"Error running MaxSAT solver: {e}")
@@ -766,7 +841,7 @@ def BPP_MaxSat(W, H, lower_bound, upper_bound):
         traceback.print_exc()
         import os
         if os.path.exists(wcnf_file):
-            os.unlink(wcnf_file)
+            os.remove(wcnf_file)
         return None, None, None
 
 
@@ -792,8 +867,8 @@ if __name__ == "__main__":
 
         # Run a subset of instances for testing
         test_instances = range(1, len(instances))  # Test all available instances
-        
-        for instance_id in test_instances:
+
+        for instance_id in range(1, len(instances)):
             instance_name = instances[instance_id]
             
             # Check if instance already completed
@@ -806,10 +881,10 @@ if __name__ == "__main__":
             print(f"{'=' * 50}")
             
             # Clean up any previous result file
-            if os.path.exists(f'results_{instance_id}.json'):
-                os.remove(f'results_{instance_id}.json')
-            if os.path.exists(f'checkpoint_{instance_id}.json'):
-                os.remove(f'checkpoint_{instance_id}.json')
+            if os.path.exists(f'results_BPP_MS_S_R_SB_{instance_id}.json'):
+                os.remove(f'results_BPP_MS_S_R_SB_{instance_id}.json')
+            if os.path.exists(f'checkpoint_BPP_MS_S_R_SB_{instance_id}.json'):
+                os.remove(f'checkpoint_BPP_MS_S_R_SB_{instance_id}.json')
             
             # Run the instance with runlim
             command = f"./runlim -r {TIMEOUT} python3 BPP_MS_S_R_SB.py {instance_id}"
@@ -823,13 +898,13 @@ if __name__ == "__main__":
                 result = None
                 
                 # Try to read results file first
-                if os.path.exists(f'results_{instance_id}.json'):
-                    with open(f'results_{instance_id}.json', 'r') as f:
+                if os.path.exists(f'results_BPP_MS_S_R_SB_{instance_id}.json'):
+                    with open(f'results_BPP_MS_S_R_SB_{instance_id}.json', 'r') as f:
                         result = json.load(f)
                 
                 # If no results file, check checkpoint
-                elif os.path.exists(f'checkpoint_{instance_id}.json'):
-                    with open(f'checkpoint_{instance_id}.json', 'r') as f:
+                elif os.path.exists(f'checkpoint_BPP_MS_S_R_SB_{instance_id}.json'):
+                    with open(f'checkpoint_BPP_MS_S_R_SB_{instance_id}.json', 'r') as f:
                         result = json.load(f)
                     result['Status'] = 'TIMEOUT'
                     result['Instance'] = instance_name
@@ -868,8 +943,22 @@ if __name__ == "__main__":
             except Exception as e:
                 print(f"Error running instance {instance_name}: {str(e)}")
             
+            # Clean up temporary WCNF files after each instance
+            import glob
+            temp_wcnf_files = glob.glob('/tmp/tmp*.wcnf')
+            for temp_file in temp_wcnf_files:
+                try:
+                    # Only remove files that are older than 30 minutes to avoid removing active files
+                    if os.path.exists(temp_file):
+                        file_age = time.time() - os.path.getmtime(temp_file)
+                        if file_age >= 900:  # 15 minutes
+                            os.remove(temp_file)
+                            print(f"Cleaned up temporary file: {temp_file}")
+                except Exception as cleanup_error:
+                    # Silently ignore cleanup errors
+                    pass
             # Clean up result files
-            for file in [f'results_{instance_id}.json', f'checkpoint_{instance_id}.json']:
+            for file in [f'results_BPP_MS_S_R_SB_{instance_id}.json', f'checkpoint_BPP_MS_S_R_SB_{instance_id}.json']:
                 if os.path.exists(file):
                     os.remove(file)
         
@@ -928,7 +1017,7 @@ if __name__ == "__main__":
             
             # Solve using Max-SAT with stacking, rotation, and SB symmetry
             bins_assignment, positions, rotations = BPP_MaxSat(bin_width, bin_height, lower_bound, upper_bound)
-            num_bins = len(bins_assignment) if bins_assignment else upper_bound
+            num_bins = len(bins_assignment) 
             stop = timeit.default_timer()
             runtime = stop - start
             
@@ -938,10 +1027,10 @@ if __name__ == "__main__":
                 
                 # Display solution if found
                 if bins_assignment:
-                    display_solution(bin_width, bin_height, rectangles, bins_assignment, positions, rotations, instance_name)
-                    print(f"Solution visualization saved to BPP_MS_S_R_SB/{instance_name}.png")
+                    # display_solution(bin_width, bin_height, rectangles, bins_assignment,positions, rotations, instance_name)
+                    display_solution_each_bin(bin_width, bin_height, rectangles, positions, rotations,  bins_assignment)
             
-            final_bins = best_num_bins if best_num_bins != float('inf') else (num_bins if num_bins else upper_bound)
+            final_bins = num_bins if num_bins != float('inf') else (num_bins if num_bins else upper_bound)
             
             # Create result
             result = {
@@ -950,7 +1039,7 @@ if __name__ == "__main__":
                 'Clauses': clauses_length,
                 'Runtime': runtime,
                 'Optimal_Bins': final_bins,
-                'Status': 'OPTIMAL'
+                'Status': 'COMPLETE' if num_bins is not None else 'ERROR'
             }
             
             # Save to Excel
@@ -976,7 +1065,7 @@ if __name__ == "__main__":
             print(f"Results saved to {excel_file}")
             
             # Save JSON result for controller
-            with open(f'results_{instance_id}.json', 'w') as f:
+            with open(f'results_BPP_MS_S_R_SB_{instance_id}.json', 'w') as f:
                 json.dump(result, f)
             
             print(f"Instance {instance_name} completed - Runtime: {runtime:.2f}s, Bins: {final_bins}")
@@ -1016,5 +1105,6 @@ if __name__ == "__main__":
             existing_df.to_excel(excel_file, index=False)
             print(f"Error results saved to {excel_file}")
             
-            with open(f'results_{instance_id}.json', 'w') as f:
+            with open(f'results_BPP_MS_S_R_SB_{instance_id}.json', 'w') as f:
                 json.dump(result, f)
+        
