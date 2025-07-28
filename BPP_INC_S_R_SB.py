@@ -787,14 +787,7 @@ def solve_single_instance(instance_name_param, time_limit):
 def controller_mode():
     """Controller mode - batch process multiple instances"""
     logger.info("Starting BPP controller mode")
-    
-    # Default instances to process
-    default_instances = [
-        "BENG01", "BENG02", "BENG03", "BENG04", "BENG05",
-        "BENG06", "BENG07", "BENG08", "BENG09", "BENG10",
-        # "CL_1_20_1", "CL_1_20_2", "CL_1_20_3", "CL_1_20_4", "CL_1_20_5"
-    ]
-    
+
     # Load instance list from file if exists
     instances_to_process = [# BENG instances (10 instances)
     "BENG01", "BENG02", "BENG03", "BENG04", "BENG05",
@@ -1011,7 +1004,7 @@ def controller_mode():
             logger.error(f"Error reading existing Excel file: {e}")
     
     # Set timeout in seconds
-    TIMEOUT = 600 
+    TIMEOUT = 900 
 
     for instance_name in instances_to_process:
         # Skip if already completed
