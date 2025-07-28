@@ -28,10 +28,9 @@ upper_bound = 0
 
 # Signal handler for graceful interruption
 def handle_interrupt(signum, frame):
-    print(f"\nReceived interrupt signal {signum}. Saving current best solution.")
+    # Avoid print statements in signal handlers to prevent reentrant call errors
     
     current_bins = best_bins if best_bins != float('inf') else upper_bound
-    print(f"Best bins found before interrupt: {current_bins}")
     
     # Save result as JSON for the controller to pick up
     result = {
@@ -41,8 +40,11 @@ def handle_interrupt(signum, frame):
         'Status': 'TIMEOUT'
     }
     
-    with open(f'results_{instance_id}.json', 'w') as f:
-        json.dump(result, f)
+    try:
+        with open(f'results_CPLEX_CP_R_SB_{instance_id}.json', 'w') as f:
+            json.dump(result, f)
+    except:
+        pass  # Silently fail if cannot write file
     
     sys.exit(0)
 
@@ -353,7 +355,7 @@ def save_checkpoint(instance_id, bins, status="IN_PROGRESS"):
         'Status': status
     }
     
-    with open(f'checkpoint_{instance_id}.json', 'w') as f:
+    with open(f'checkpoint_CPLEX_CP_R_SB_{instance_id}.json', 'w') as f:
         json.dump(checkpoint, f)
 
 def solve_bin_packing_with_rotation(W, H, rectangles, time_limit=900):
@@ -531,10 +533,27 @@ def solve_bin_packing_with_rotation(W, H, rectangles, time_limit=900):
     # Solve with time limit
     print("Solving with CPLEX CP...")
     solve_start = time.time()
-    solution = model.solve(TimeLimit=time_limit, LogVerbosity='Quiet')
-    solve_time = time.time() - solve_start
     
-    print(f"Solver finished in {solve_time:.2f}s")
+    try:
+        solution = model.solve(TimeLimit=time_limit, LogVerbosity="Quiet")
+        solve_time = time.time() - solve_start
+        print(f"Solver finished in {solve_time:.2f}s")
+        
+    except Exception as e:
+        solve_time = time.time() - solve_start
+        print(f"Solver error: {str(e)}")
+        print(f"Solver interrupted after {solve_time:.2f}s")
+        
+        # Return current best solution on error
+        return {
+            'status': 'ERROR',
+            'n_bins': best_bins if best_bins != float('inf') else upper_bound,
+            'assignments': best_assignments,
+            'positions': best_positions,
+            'rotations': best_rotations,
+            'solve_time': solve_time,
+            'objective_value': best_bins if best_bins != float('inf') else upper_bound
+        }
     
     if solution and solution.is_solution():
         # Extract solution
@@ -663,7 +682,8 @@ if __name__ == "__main__":
             try:
                 existing_df = pd.read_excel(excel_file)
                 completed_instances = existing_df['Instance'].tolist() if 'Instance' in existing_df.columns else []
-            except:
+            except Exception as e:
+                print(f"Error reading Excel file: {e}. Starting with empty DataFrame.")
                 existing_df = pd.DataFrame()
                 completed_instances = []
         else:
@@ -678,21 +698,21 @@ if __name__ == "__main__":
             instance_name = instances[instance_id]
             
             # Skip if already completed
-            # if instance_name in completed_instances:
-            #     print(f"\nSkipping instance {instance_id}: {instance_name} (already completed)")
-            #     continue
+            if instance_name in completed_instances:
+                print(f"\nSkipping instance {instance_id}: {instance_name} (already completed)")
+                continue
                 
             print(f"\n{'=' * 50}")
             print(f"Running instance {instance_id}: {instance_name}")
             print(f"{'=' * 50}")
             
             # Clean up previous result files
-            for temp_file in [f'results_{instance_id}.json', f'checkpoint_{instance_id}.json']:
+            for temp_file in [f'results_CPLEX_CP_R_SB_{instance_id}.json', f'checkpoint_CPLEX_CP_R_SB_{instance_id}.json']:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
             
             # Run instance with runlim
-            command = f"./runlim -t {TIME_LIMIT} python3 CPLEX_CP_R_SB.py {instance_id}"
+            command = f"./runlim -r {TIME_LIMIT} python3 CPLEX_CP_R_SB.py {instance_id}"
             
             try:
                 process = subprocess.Popen(command, shell=True)
@@ -702,11 +722,11 @@ if __name__ == "__main__":
                 # Check results
                 result = None
                 
-                if os.path.exists(f'results_{instance_id}.json'):
-                    with open(f'results_{instance_id}.json', 'r') as f:
+                if os.path.exists(f'results_CPLEX_CP_R_SB_{instance_id}.json'):
+                    with open(f'results_CPLEX_CP_R_SB_{instance_id}.json', 'r') as f:
                         result = json.load(f)
-                elif os.path.exists(f'checkpoint_{instance_id}.json'):
-                    with open(f'checkpoint_{instance_id}.json', 'r') as f:
+                elif os.path.exists(f'checkpoint_CPLEX_CP_R_SB_{instance_id}.json'):
+                    with open(f'checkpoint_CPLEX_CP_R_SB_{instance_id}.json', 'r') as f:
                         result = json.load(f)
                     result['Status'] = 'TIMEOUT'
                     result['Instance'] = instance_name
@@ -730,7 +750,8 @@ if __name__ == "__main__":
                             else:
                                 result_df = pd.DataFrame([result])
                                 existing_df = pd.concat([existing_df, result_df], ignore_index=True)
-                        except:
+                        except Exception as e:
+                            print(f"Error reading Excel file: {e}. Creating new DataFrame.")
                             existing_df = pd.DataFrame([result])
                     else:
                         existing_df = pd.DataFrame([result])
@@ -744,7 +765,7 @@ if __name__ == "__main__":
                 print(f"Error running instance {instance_name}: {str(e)}")
             
             # Clean up temp files
-            for temp_file in [f'results_{instance_id}.json', f'checkpoint_{instance_id}.json']:
+            for temp_file in [f'results_CPLEX_CP_R_SB_{instance_id}.json', f'checkpoint_CPLEX_CP_R_SB_{instance_id}.json']:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
         
@@ -785,7 +806,20 @@ if __name__ == "__main__":
             print(f"Upper bound: {upper_bound}")
             
             # Solve with CP
-            result = solve_bin_packing_with_rotation(W, H, rectangles, time_limit=550)
+            try:
+                result = solve_bin_packing_with_rotation(W, H, rectangles, time_limit=900)
+            except Exception as e:
+                print(f"Error in instance {instance_name}: {str(e)}")
+                # Create error result
+                result = {
+                    'status': 'ERROR',
+                    'n_bins': upper_bound,
+                    'assignments': [],
+                    'positions': [],
+                    'rotations': [],
+                    'solve_time': 0,
+                    'objective_value': upper_bound
+                }
             
             stop = timeit.default_timer()
             runtime = stop - start
@@ -826,7 +860,8 @@ if __name__ == "__main__":
                     else:
                         result_df = pd.DataFrame([result_data])
                         existing_df = pd.concat([existing_df, result_df], ignore_index=True)
-                except:
+                except Exception as e:
+                    print(f"Error reading Excel file: {e}. Creating new DataFrame.")
                     existing_df = pd.DataFrame([result_data])
             else:
                 existing_df = pd.DataFrame([result_data])
@@ -835,7 +870,7 @@ if __name__ == "__main__":
             print(f"Results saved to {excel_file}")
             
             # Save JSON result for controller
-            with open(f'results_{instance_id}.json', 'w') as f:
+            with open(f'results_CPLEX_CP_R_SB_{instance_id}.json', 'w') as f:
                 json.dump(result_data, f)
             
             print(f"Instance {instance_name} completed - Runtime: {runtime:.2f}s, Bins: {result_data['N_Bins']}")
@@ -866,7 +901,8 @@ if __name__ == "__main__":
                     else:
                         result_df = pd.DataFrame([result_data])
                         existing_df = pd.concat([existing_df, result_df], ignore_index=True)
-                except:
+                except Exception as e:
+                    print(f"Error reading Excel file: {e}. Creating new DataFrame.")
                     existing_df = pd.DataFrame([result_data])
             else:
                 existing_df = pd.DataFrame([result_data])
@@ -874,5 +910,5 @@ if __name__ == "__main__":
             existing_df.to_excel(excel_file, index=False)
             print(f"Error results saved to {excel_file}")
             
-            with open(f'results_{instance_id}.json', 'w') as f:
+            with open(f'results_CPLEX_CP_R_SB_{instance_id}.json', 'w') as f:
                 json.dump(result_data, f)

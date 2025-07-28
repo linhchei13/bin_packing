@@ -28,10 +28,9 @@ upper_bound = 0
 
 # Signal handler for graceful interruption
 def handle_interrupt(signum, frame):
-    print(f"\nReceived interrupt signal {signum}. Saving current best solution.")
+    # Avoid print statements in signal handlers to prevent reentrant call errors
     
     current_bins = best_bins if best_bins != float('inf') else upper_bound
-    print(f"Best bins found before interrupt: {current_bins}")
     
     # Save result as JSON for the controller to pick up
     result = {
@@ -41,8 +40,11 @@ def handle_interrupt(signum, frame):
         'Status': 'TIMEOUT'
     }
     
-    with open(f'results_{instance_id}.json', 'w') as f:
-        json.dump(result, f)
+    try:
+        with open(f'results_GUROBI_MIP_R_{instance_id}.json', 'w') as f:
+            json.dump(result, f)
+    except:
+        pass  # Silently fail if cannot write file
     
     sys.exit(0)
 
@@ -354,8 +356,8 @@ def save_checkpoint(instance_id, bins, status="IN_PROGRESS"):
         'N_Bins': bins if bins != float('inf') else upper_bound,
         'Status': status
     }
-    
-    with open(f'checkpoint_{instance_id}.json', 'w') as f:
+
+    with open(f'checkpoint_GUROBI_MIP_R_{instance_id}.json', 'w') as f:
         json.dump(checkpoint, f)
 
 def display_solution(W, H, rectangles, positions, assignments, rotations, instance_name):
@@ -467,14 +469,23 @@ def solve_bin_packing_with_rotation(W, H, rectangles, lower_bound, upper_bound, 
     
     # Variables
     # 1. Position variables
-    x = mdl.addVars(n, max_bins, lb=0, vtype=GRB.CONTINUOUS, name="x")
-    y = mdl.addVars(n, max_bins, lb=0, vtype=GRB.CONTINUOUS, name="y")
+    x = {}  # x[i,b] = x-position of item i in bin b
+    y = {}  # y[i,b] = y-position of item i in bin b
+    for i in range(n):
+        for b in range(max_bins):
+            x[i,b] = mdl.addVar(lb=0, ub=W - rectangles[i][0], vtype=GRB.INTEGER, name=f'x_{i}_{b}')
+            y[i,b] = mdl.addVar(lb=0, ub=H - rectangles[i][1], vtype=GRB.INTEGER, name=f'y_{i}_{b}')
     
     # 2. Assignment variables
-    z = mdl.addVars(n, max_bins, vtype=GRB.BINARY, name="z")
+    z = {}  # z[i,b] = 1 if item i is assigned to bin b
+    for i in range(n):
+        for b in range(max_bins):
+            z[i,b] = mdl.addVar(vtype=GRB.BINARY, name=f'z_{i}_{b}')
     
     # 3. Bin usage variables
-    u = mdl.addVars(max_bins, vtype=GRB.BINARY, name="u")
+    u = {}  # u[b] = 1 if bin b is used
+    for b in range(max_bins):
+        u[b] = mdl.addVar(vtype=GRB.BINARY, name=f'u_{b}')
     
     # 4. Rotation variables
     rotate = mdl.addVars(n, vtype=GRB.BINARY, name="rotate")
@@ -896,7 +907,7 @@ if __name__ == "__main__":
             print(f"{'=' * 50}")
             
             # Clean up previous result files
-            for temp_file in [f'results_{instance_id}.json', f'checkpoint_{instance_id}.json']:
+            for temp_file in [f'results_GUROBI_MIP_R_{instance_id}.json', f'checkpoint_GUROBI_MIP_R_{instance_id}.json']:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
             
@@ -911,11 +922,11 @@ if __name__ == "__main__":
                 # Check results
                 result = None
                 
-                if os.path.exists(f'results_{instance_id}.json'):
-                    with open(f'results_{instance_id}.json', 'r') as f:
+                if os.path.exists(f'results_GUROBI_MIP_R_{instance_id}.json'):
+                    with open(f'results_GUROBI_MIP_R_{instance_id}.json', 'r') as f:
                         result = json.load(f)
-                elif os.path.exists(f'checkpoint_{instance_id}.json'):
-                    with open(f'checkpoint_{instance_id}.json', 'r') as f:
+                elif os.path.exists(f'checkpoint_GUROBI_MIP_R_{instance_id}.json'):
+                    with open(f'checkpoint_GUROBI_MIP_R_{instance_id}.json', 'r') as f:
                         result = json.load(f)
                     result['Status'] = 'TIMEOUT'
                     result['Instance'] = instance_name
@@ -953,7 +964,7 @@ if __name__ == "__main__":
                 print(f"Error running instance {instance_name}: {str(e)}")
             
             # Clean up temp files
-            for temp_file in [f'results_{instance_id}.json', f'checkpoint_{instance_id}.json']:
+            for temp_file in [f'results_GUROBI_MIP_R_{instance_id}.json', f'checkpoint_GUROBI_MIP_R_{instance_id}.json']:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
         
@@ -1047,7 +1058,7 @@ if __name__ == "__main__":
             print(f"Results saved to {excel_file}")
             
             # Save JSON result for controller
-            with open(f'results_{instance_id}.json', 'w') as f:
+            with open(f'results_GUROBI_MIP_R_{instance_id}.json', 'w') as f:
                 json.dump(result, f)
             
             print(f"Instance {instance_name} completed - Runtime: {runtime:.2f}s, Bins: {n_bins}")
@@ -1087,5 +1098,5 @@ if __name__ == "__main__":
             existing_df.to_excel(excel_file, index=False)
             print(f"Error results saved to {excel_file}")
             
-            with open(f'results_{instance_id}.json', 'w') as f:
+            with open(f'results_GUROBI_MIP_R_{instance_id}.json', 'w') as f:
                 json.dump(result, f)

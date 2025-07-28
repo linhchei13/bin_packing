@@ -28,10 +28,9 @@ upper_bound = 0
 
 # Signal handler for graceful interruption
 def handle_interrupt(signum, frame):
-    print(f"\nReceived interrupt signal {signum}. Saving current best solution.")
+    # Avoid print statements in signal handlers to prevent reentrant call errors
     
     current_bins = best_bins if best_bins != float('inf') else upper_bound
-    print(f"Best bins found before interrupt: {current_bins}")
     
     # Save result as JSON for the controller to pick up
     result = {
@@ -41,8 +40,11 @@ def handle_interrupt(signum, frame):
         'Status': 'TIMEOUT'
     }
     
-    with open(f'results_{instance_id}.json', 'w') as f:
-        json.dump(result, f)
+    try:
+        with open(f'results_CPLEX_MIP_R_SB_{instance_id}.json', 'w') as f:
+            json.dump(result, f)
+    except:
+        pass  # Silently fail if cannot write file
     
     sys.exit(0)
 
@@ -355,7 +357,7 @@ def save_checkpoint(instance_id, bins, status="IN_PROGRESS"):
         'Status': status
     }
     
-    with open(f'checkpoint_{instance_id}.json', 'w') as f:
+    with open(f'checkpoint_CPLEX_MIP_R_SB_{instance_id}.json', 'w') as f:
         json.dump(checkpoint, f)
 
 def display_solution(W, H, rectangles, positions, assignments, rotations, instance_name):
@@ -467,8 +469,8 @@ def solve_bin_packing_with_rotation(W, H, rectangles, lower_bound, upper_bound, 
     y = {}  # y[i,b] = y-position of item i in bin b
     for i in range(n):
         for b in range(max_bins):
-            x[i,b] = mdl.continuous_var(lb=0, name=f'x_{i}_{b}')
-            y[i,b] = mdl.continuous_var(lb=0, name=f'y_{i}_{b}')
+            x[i,b] = mdl.integer_var(lb=0, ub=W - rectangles[i][0], name=f'x_{i}_{b}')
+            y[i,b] = mdl.integer_var(lb=0, ub=H - rectangles[i][1], name=f'y_{i}_{b}')
     
     # 2. Assignment variables
     z = {}  # z[i,b] = 1 if item i is assigned to bin b
@@ -486,30 +488,21 @@ def solve_bin_packing_with_rotation(W, H, rectangles, lower_bound, upper_bound, 
     for i in range(n):
         rotate[i] = mdl.binary_var(name=f'rotate_{i}')
     
-    # 5. Effective width and height after rotation
-    w_eff = {}  # Effective width
-    h_eff = {}  # Effective height
-    for i in range(n):
-        w_eff[i] = mdl.continuous_var(name=f'w_eff_{i}')
-        h_eff[i] = mdl.continuous_var(name=f'h_eff_{i}')
-        
-        # Define effective dimensions based on rotation
-        mdl.add_constraint(w_eff[i] == rectangles[i][0] * (1 - rotate[i]) + rectangles[i][1] * rotate[i])
-        mdl.add_constraint(h_eff[i] == rectangles[i][1] * (1 - rotate[i]) + rectangles[i][0] * rotate[i])
-    
-    # 6. Auxiliary variables for non-overlapping constraints
+    # 5. Auxiliary variables for non-overlapping constraints (following Gurobi logic)
+    # Create auxiliary variables for all pairs (i,j,b) where i != j
     left = {}   # left[i,j,b] = 1 if item i is to the left of item j in bin b
     right = {}  # right[i,j,b] = 1 if item i is to the right of item j in bin b
     below = {}  # below[i,j,b] = 1 if item i is below item j in bin b
     above = {}  # above[i,j,b] = 1 if item i is above item j in bin b
     
     for i in range(n):
-        for j in range(i+1, n):
-            for b in range(max_bins):
-                left[i,j,b] = mdl.binary_var(name=f'left_{i}_{j}_{b}')
-                right[i,j,b] = mdl.binary_var(name=f'right_{i}_{j}_{b}')
-                below[i,j,b] = mdl.binary_var(name=f'below_{i}_{j}_{b}')
-                above[i,j,b] = mdl.binary_var(name=f'above_{i}_{j}_{b}')
+        for j in range(n):
+            if i != j:
+                for b in range(max_bins):
+                    left[i,j,b] = mdl.binary_var(name=f'left_{i}_{j}_{b}')
+                    right[i,j,b] = mdl.binary_var(name=f'right_{i}_{j}_{b}')
+                    below[i,j,b] = mdl.binary_var(name=f'below_{i}_{j}_{b}')
+                    above[i,j,b] = mdl.binary_var(name=f'above_{i}_{j}_{b}')
     
     # Keep track of constraint count
     constraint_count = 0
@@ -518,25 +511,31 @@ def solve_bin_packing_with_rotation(W, H, rectangles, lower_bound, upper_bound, 
     
     # 1. Each item must be placed in exactly one bin
     for i in range(n):
-        mdl.add_constraint(mdl.sum(z[i,b] for b in range(max_bins)) == 1)
+        mdl.add_constraint(mdl.sum(z[i,b] for b in range(max_bins)) == 1, f"assign_{i}")
         constraint_count += 1
     
     # 2. Bin usage constraints
     for b in range(max_bins):
         for i in range(n):
-            mdl.add_constraint(z[i,b] <= u[b])
+            mdl.add_constraint(z[i,b] <= u[b], f"bin_usage_{i}_{b}")
             constraint_count += 1
     
     # 3. Position bounds (considering rotation)
+    M = W + H  # Big-M value
     for i in range(n):
+        wi, hi = rectangles[i]
         for b in range(max_bins):
-            mdl.add_constraint(x[i,b] + w_eff[i] <= W + (W + H) * (1 - z[i,b]))
-            mdl.add_constraint(y[i,b] + h_eff[i] <= H + (W + H) * (1 - z[i,b]))
+            # Width constraint considering rotation
+            mdl.add_constraint(x[i,b] + wi * (1 - rotate[i]) + hi * rotate[i] <= W + M * (1 - z[i,b]), 
+                             f"width_bound_{i}_{b}")
+            # Height constraint considering rotation
+            mdl.add_constraint(y[i,b] + hi * (1 - rotate[i]) + wi * rotate[i] <= H + M * (1 - z[i,b]), 
+                             f"height_bound_{i}_{b}")
             constraint_count += 2
     
     # 4. Symmetry Breaking: Bins are used in order
     for b in range(1, max_bins):
-        mdl.add_constraint(u[b] <= u[b-1])
+        mdl.add_constraint(u[b] <= u[b-1], f"bin_order_{b}")
         constraint_count += 1
     
     # 5. Symmetry Breaking: Largest rectangle placement
@@ -549,68 +548,83 @@ def solve_bin_packing_with_rotation(W, H, rectangles, lower_bound, upper_bound, 
             max_area_idx = i
     
     if n > 1:
-        mdl.add_constraint(z[max_area_idx, 0] == 1)
+        mdl.add_constraint(z[max_area_idx, 0] == 1, "largest_first_bin")
         constraint_count += 1
         
         # Domain reduction for largest rectangle
-        mdl.add_constraint(x[max_area_idx, 0] <= (W - min(rectangles[max_area_idx])) / 2)
-        mdl.add_constraint(y[max_area_idx, 0] <= (H - min(rectangles[max_area_idx])) / 2)
+        mdl.add_constraint(x[max_area_idx, 0] <= (W - min(rectangles[max_area_idx])) / 2, 
+                         "largest_domain_x")
+        mdl.add_constraint(y[max_area_idx, 0] <= (H - min(rectangles[max_area_idx])) / 2, 
+                         "largest_domain_y")
         constraint_count += 2
     
-    # 6. Non-overlapping constraints with rotation consideration - Fixed version
+    # 6. Non-overlapping constraints with correct auxiliary variables logic
     for i in range(n):
-        for j in range(i+1, n):
+        for j in range(n):
+            if i == j:
+                continue
+            
+            wi, hi = rectangles[i]
+            wj, hj = rectangles[j]
+            
             for b in range(max_bins):
-                # If both items i and j are in bin b, they must not overlap
-                M = W + H  # Big-M value
-                
                 # At least one separation must be true if both items are in bin b
                 mdl.add_constraint(left[i,j,b] + right[i,j,b] + below[i,j,b] + above[i,j,b] >= 
-                                  z[i,b] + z[j,b] - 1)
+                                 z[i,b] + z[j,b] - 1, f"separation_{i}_{j}_{b}")
                 constraint_count += 1
                 
                 # Position constraints based on separation choices (with rotation)
-                # i to left of j: x[i] + w_eff[i] <= x[j]
-                mdl.add_constraint(x[i,b] + w_eff[i] <= x[j,b] + M * (1 - left[i,j,b]))
+                # i to left of j: x[i] + width_i <= x[j]
+                mdl.add_constraint(x[i,b] + wi * (1 - rotate[i]) + hi * rotate[i] <= 
+                                 x[j,b] + M * (1 - left[i,j,b]), f"left_{i}_{j}_{b}")
                 
-                # i to right of j: x[j] + w_eff[j] <= x[i]  
-                mdl.add_constraint(x[j,b] + w_eff[j] <= x[i,b] + M * (1 - right[i,j,b]))
+                # i to right of j: x[j] + width_j <= x[i]
+                mdl.add_constraint(x[j,b] + wj * (1 - rotate[j]) + hj * rotate[j] <= 
+                                 x[i,b] + M * (1 - right[i,j,b]), f"right_{i}_{j}_{b}")
                 
-                # i below j: y[i] + h_eff[i] <= y[j]
-                mdl.add_constraint(y[i,b] + h_eff[i] <= y[j,b] + M * (1 - below[i,j,b]))
+                # i below j: y[i] + height_i <= y[j]
+                mdl.add_constraint(y[i,b] + hi * (1 - rotate[i]) + wi * rotate[i] <= 
+                                 y[j,b] + M * (1 - below[i,j,b]), f"below_{i}_{j}_{b}")
                 
-                # i above j: y[j] + h_eff[j] <= y[i]
-                mdl.add_constraint(y[j,b] + h_eff[j] <= y[i,b] + M * (1 - above[i,j,b]))
-                constraint_count += 5
+                # i above j: y[j] + height_j <= y[i]
+                mdl.add_constraint(y[j,b] + hj * (1 - rotate[j]) + wj * rotate[j] <= 
+                                 y[i,b] + M * (1 - above[i,j,b]), f"above_{i}_{j}_{b}")
+                constraint_count += 4
     
-    # 7. Same-sized rectangles symmetry breaking
+    # 7. Same-sized rectangles symmetry breaking (following Gurobi logic)
     for i in range(n):
         for j in range(i+1, n):
-            if rectangles[i][0] == rectangles[j][0] and rectangles[i][1] == rectangles[j][1]:
-                # For identical rectangles, apply ordering
+            wi, hi = rectangles[i]
+            wj, hj = rectangles[j]
+            
+            # For identical rectangles (considering rotation)
+            if (wi == wj and hi == hj) or (wi == hj and hi == wj):
+                # Apply ordering: i must come before j
                 for b in range(max_bins):
                     for b2 in range(b):
-                        mdl.add_constraint(z[i,b] + z[j,b2] <= 1)
+                        # If i is in bin b and j is in bin b2, then b < b2 is invalid
+                        mdl.add_constraint(z[i,b] + z[j,b2] <= 1, f"same_rect_bin_{i}_{j}_{b}_{b2}")
                         constraint_count += 1
                 
-                # Lexicographic ordering in same bin
+                # If both in same bin, impose ordering
                 for b in range(max_bins):
-                    mdl.add_constraint(left[i,j,b] + below[i,j,b] >= z[i,b] + z[j,b] - 1)
+                    # Either i is to the left of j, or they're at same x and i is below j
+                    mdl.add_constraint(left[i,j,b] >= z[i,b] + z[j,b] - 1, f"same_rect_order_{i}_{j}_{b}")
                     constraint_count += 1
     
-    # 8. One pair constraint - Fixed version
+    # 8. One Pair Constraint (similar to C2 from SPP, following Gurobi logic)
     if n >= 2:
-        # Fix relative position of first two rectangles
-        for b in range(max_bins):
-            # Ensure rectangle 0 is to the left of or below rectangle 1
-            mdl.add_constraint(right[0,1,b] == 0)  # Rectangle 0 cannot be to the right of rectangle 1
-            mdl.add_constraint(above[0,1,b] == 0)  # Rectangle 0 cannot be above rectangle 1
-            constraint_count += 2
+        # Rectangle 1 cannot be to the left of rectangle 0
+        mdl.add_constraint(left[1,0,0] == 0, f"pair_left_0")
+        # Rectangle 1 cannot be below rectangle 0
+        mdl.add_constraint(below[1,0,0] == 0, f"pair_below_0")
+        constraint_count += 2
     
     # Set objective: minimize number of bins used
     mdl.minimize(mdl.sum(u[b] for b in range(max_bins)))
     
     print(f"Model created in {time.time() - start_model_time:.2f}s")
+    print(f"Total constraints: {constraint_count}")
     
     # Save checkpoint before solving
     save_checkpoint(instance_id, best_bins if best_bins != float('inf') else upper_bound)
@@ -655,7 +669,7 @@ def solve_bin_packing_with_rotation(W, H, rectangles, lower_bound, upper_bound, 
             save_checkpoint(instance_id, best_bins)
         
         result = {
-            'status': 'OPTIMAL' if 'optimal' in mdl.solve_details.status else 'FEASIBLE',
+            'status': 'OPTIMAL' if 'optimal' in str(mdl.solve_details.status).lower() else 'FEASIBLE',
             'n_bins': bins_used,
             'assignments': assignments,
             'positions': positions,
@@ -669,6 +683,7 @@ def solve_bin_packing_with_rotation(W, H, rectangles, lower_bound, upper_bound, 
     else:
         print("No solution found")
         return None
+
 start = timeit.default_timer()
 
 if __name__ == "__main__":
@@ -686,220 +701,14 @@ if __name__ == "__main__":
                 completed_instances = existing_df['Instance'].tolist() if 'Instance' in existing_df.columns else []
             except:
                 existing_df = pd.DataFrame()
-                completed_instances = [
-    "",
-    # BENG instances (10 instances)
-    "BENG01", "BENG02", "BENG03", "BENG04", "BENG05",
-    "BENG06", "BENG07", "BENG08", "BENG09", "BENG10",
-    
-    # CLASS instances (500 instances)
-    # CL_1_20_x (10 instances)
-    "CL_1_20_1", "CL_1_20_2", "CL_1_20_3", "CL_1_20_4", "CL_1_20_5",
-    "CL_1_20_6", "CL_1_20_7", "CL_1_20_8", "CL_1_20_9", "CL_1_20_10",
-    
-    # CL_1_40_x (10 instances)
-    "CL_1_40_1", "CL_1_40_2", "CL_1_40_3", "CL_1_40_4", "CL_1_40_5",
-    "CL_1_40_6", "CL_1_40_7", "CL_1_40_8", "CL_1_40_9", "CL_1_40_10",
-    
-    # CL_1_60_x (10 instances)
-    "CL_1_60_1", "CL_1_60_2", "CL_1_60_3", "CL_1_60_4", "CL_1_60_5",
-    "CL_1_60_6", "CL_1_60_7", "CL_1_60_8", "CL_1_60_9", "CL_1_60_10",
-    
-    # CL_1_80_x (10 instances)
-    "CL_1_80_1", "CL_1_80_2", "CL_1_80_3", "CL_1_80_4", "CL_1_80_5",
-    "CL_1_80_6", "CL_1_80_7", "CL_1_80_8", "CL_1_80_9", "CL_1_80_10",
-    
-    # CL_1_100_x (10 instances)
-    "CL_1_100_1", "CL_1_100_2", "CL_1_100_3", "CL_1_100_4", "CL_1_100_5",
-    "CL_1_100_6", "CL_1_100_7", "CL_1_100_8", "CL_1_100_9", "CL_1_100_10",
-    
-    # CL_2_20_x (10 instances)
-    "CL_2_20_1", "CL_2_20_2", "CL_2_20_3", "CL_2_20_4", "CL_2_20_5",
-    "CL_2_20_6", "CL_2_20_7", "CL_2_20_8", "CL_2_20_9", "CL_2_20_10",
-    
-    # CL_2_40_x (10 instances)
-    "CL_2_40_1", "CL_2_40_2", "CL_2_40_3", "CL_2_40_4", "CL_2_40_5",
-    "CL_2_40_6", "CL_2_40_7", "CL_2_40_8", "CL_2_40_9", "CL_2_40_10",
-    
-    # CL_2_60_x (10 instances)
-    "CL_2_60_1", "CL_2_60_2", "CL_2_60_3", "CL_2_60_4", "CL_2_60_5",
-    "CL_2_60_6", "CL_2_60_7", "CL_2_60_8", "CL_2_60_9", "CL_2_60_10",
-    
-    # CL_2_80_x (10 instances)
-    "CL_2_80_1", "CL_2_80_2", "CL_2_80_3", "CL_2_80_4", "CL_2_80_5",
-    "CL_2_80_6", "CL_2_80_7", "CL_2_80_8", "CL_2_80_9", "CL_2_80_10",
-    
-    # CL_2_100_x (10 instances)
-    "CL_2_100_1", "CL_2_100_2", "CL_2_100_3", "CL_2_100_4", "CL_2_100_5",
-    "CL_2_100_6", "CL_2_100_7", "CL_2_100_8", "CL_2_100_9", "CL_2_100_10",
-    
-    # CL_3_20_x (10 instances)
-    "CL_3_20_1", "CL_3_20_2", "CL_3_20_3", "CL_3_20_4", "CL_3_20_5",
-    "CL_3_20_6", "CL_3_20_7", "CL_3_20_8", "CL_3_20_9", "CL_3_20_10",
-    
-    # CL_3_40_x (10 instances)
-    "CL_3_40_1", "CL_3_40_2", "CL_3_40_3", "CL_3_40_4", "CL_3_40_5",
-    "CL_3_40_6", "CL_3_40_7", "CL_3_40_8", "CL_3_40_9", "CL_3_40_10",
-    
-    # CL_3_60_x (10 instances)
-    "CL_3_60_1", "CL_3_60_2", "CL_3_60_3", "CL_3_60_4", "CL_3_60_5",
-    "CL_3_60_6", "CL_3_60_7", "CL_3_60_8", "CL_3_60_9", "CL_3_60_10",
-    
-    # CL_3_80_x (10 instances)
-    "CL_3_80_1", "CL_3_80_2", "CL_3_80_3", "CL_3_80_4", "CL_3_80_5",
-    "CL_3_80_6", "CL_3_80_7", "CL_3_80_8", "CL_3_80_9", "CL_3_80_10",
-    
-    # CL_3_100_x (10 instances)
-    "CL_3_100_1", "CL_3_100_2", "CL_3_100_3", "CL_3_100_4", "CL_3_100_5",
-    "CL_3_100_6", "CL_3_100_7", "CL_3_100_8", "CL_3_100_9", "CL_3_100_10",
-    
-    # CL_4_20_x (10 instances)
-    "CL_4_20_1", "CL_4_20_2", "CL_4_20_3", "CL_4_20_4", "CL_4_20_5",
-    "CL_4_20_6", "CL_4_20_7", "CL_4_20_8", "CL_4_20_9", "CL_4_20_10",
-    
-    # CL_4_40_x (10 instances)
-    "CL_4_40_1", "CL_4_40_2", "CL_4_40_3", "CL_4_40_4", "CL_4_40_5",
-    "CL_4_40_6", "CL_4_40_7", "CL_4_40_8", "CL_4_40_9", "CL_4_40_10",
-    
-    # CL_4_60_x (10 instances)
-    "CL_4_60_1", "CL_4_60_2", "CL_4_60_3", "CL_4_60_4", "CL_4_60_5",
-    "CL_4_60_6", "CL_4_60_7", "CL_4_60_8", "CL_4_60_9", "CL_4_60_10",
-    
-    # CL_4_80_x (10 instances)
-    "CL_4_80_1", "CL_4_80_2", "CL_4_80_3", "CL_4_80_4", "CL_4_80_5",
-    "CL_4_80_6", "CL_4_80_7", "CL_4_80_8", "CL_4_80_9", "CL_4_80_10",
-    
-    # CL_4_100_x (10 instances)
-    "CL_4_100_1", "CL_4_100_2", "CL_4_100_3", "CL_4_100_4", "CL_4_100_5",
-    "CL_4_100_6", "CL_4_100_7", "CL_4_100_8", "CL_4_100_9", "CL_4_100_10",
-    
-    # CL_5_20_x (10 instances)
-    "CL_5_20_1", "CL_5_20_2", "CL_5_20_3", "CL_5_20_4", "CL_5_20_5",
-    "CL_5_20_6", "CL_5_20_7", "CL_5_20_8", "CL_5_20_9", "CL_5_20_10",
-    
-    # CL_5_40_x (10 instances)
-    "CL_5_40_1", "CL_5_40_2", "CL_5_40_3", "CL_5_40_4", "CL_5_40_5",
-    "CL_5_40_6", "CL_5_40_7", "CL_5_40_8", "CL_5_40_9", "CL_5_40_10",
-    
-    # CL_5_60_x (10 instances)
-    "CL_5_60_1", "CL_5_60_2", "CL_5_60_3", "CL_5_60_4", "CL_5_60_5",
-    "CL_5_60_6", "CL_5_60_7", "CL_5_60_8", "CL_5_60_9", "CL_5_60_10",
-    
-    # CL_5_80_x (10 instances)
-    "CL_5_80_1", "CL_5_80_2", "CL_5_80_3", "CL_5_80_4", "CL_5_80_5",
-    "CL_5_80_6", "CL_5_80_7", "CL_5_80_8", "CL_5_80_9", "CL_5_80_10",
-    
-    # CL_5_100_x (10 instances)
-    "CL_5_100_1", "CL_5_100_2", "CL_5_100_3", "CL_5_100_4", "CL_5_100_5",
-    "CL_5_100_6", "CL_5_100_7", "CL_5_100_8", "CL_5_100_9", "CL_5_100_10",
-    
-    # CL_6_20_x (10 instances)
-    "CL_6_20_1", "CL_6_20_2", "CL_6_20_3", "CL_6_20_4", "CL_6_20_5",
-    "CL_6_20_6", "CL_6_20_7", "CL_6_20_8", "CL_6_20_9", "CL_6_20_10",
-    
-    # CL_6_40_x (10 instances)
-    "CL_6_40_1", "CL_6_40_2", "CL_6_40_3", "CL_6_40_4", "CL_6_40_5",
-    "CL_6_40_6", "CL_6_40_7", "CL_6_40_8", "CL_6_40_9", "CL_6_40_10",
-    
-    # CL_6_60_x (10 instances)
-    "CL_6_60_1", "CL_6_60_2", "CL_6_60_3", "CL_6_60_4", "CL_6_60_5",
-    "CL_6_60_6", "CL_6_60_7", "CL_6_60_8", "CL_6_60_9", "CL_6_60_10",
-    
-    # CL_6_80_x (10 instances)
-    "CL_6_80_1", "CL_6_80_2", "CL_6_80_3", "CL_6_80_4", "CL_6_80_5",
-    "CL_6_80_6", "CL_6_80_7", "CL_6_80_8", "CL_6_80_9", "CL_6_80_10",
-    
-    # CL_6_100_x (10 instances)
-    "CL_6_100_1", "CL_6_100_2", "CL_6_100_3", "CL_6_100_4", "CL_6_100_5",
-    "CL_6_100_6", "CL_6_100_7", "CL_6_100_8", "CL_6_100_9", "CL_6_100_10",
-    
-    # CL_7_20_x (10 instances)
-    "CL_7_20_1", "CL_7_20_2", "CL_7_20_3", "CL_7_20_4", "CL_7_20_5",
-    "CL_7_20_6", "CL_7_20_7", "CL_7_20_8", "CL_7_20_9", "CL_7_20_10",
-    
-    # CL_7_40_x (10 instances)
-    "CL_7_40_1", "CL_7_40_2", "CL_7_40_3", "CL_7_40_4", "CL_7_40_5",
-    "CL_7_40_6", "CL_7_40_7", "CL_7_40_8", "CL_7_40_9", "CL_7_40_10",
-    
-    # CL_7_60_x (10 instances)
-    "CL_7_60_1", "CL_7_60_2", "CL_7_60_3", "CL_7_60_4", "CL_7_60_5",
-    "CL_7_60_6", "CL_7_60_7", "CL_7_60_8", "CL_7_60_9", "CL_7_60_10",
-    
-    # CL_7_80_x (10 instances)
-    "CL_7_80_1", "CL_7_80_2", "CL_7_80_3", "CL_7_80_4", "CL_7_80_5",
-    "CL_7_80_6", "CL_7_80_7", "CL_7_80_8", "CL_7_80_9", "CL_7_80_10",
-    
-    # CL_7_100_x (10 instances)
-    "CL_7_100_1", "CL_7_100_2", "CL_7_100_3", "CL_7_100_4", "CL_7_100_5",
-    "CL_7_100_6", "CL_7_100_7", "CL_7_100_8", "CL_7_100_9", "CL_7_100_10",
-    
-    # CL_8_20_x (10 instances)
-    "CL_8_20_1", "CL_8_20_2", "CL_8_20_3", "CL_8_20_4", "CL_8_20_5",
-    "CL_8_20_6", "CL_8_20_7", "CL_8_20_8", "CL_8_20_9", "CL_8_20_10",
-    
-    # CL_8_40_x (10 instances)
-    "CL_8_40_1", "CL_8_40_2", "CL_8_40_3", "CL_8_40_4", "CL_8_40_5",
-    "CL_8_40_6", "CL_8_40_7", "CL_8_40_8", "CL_8_40_9", "CL_8_40_10",
-    
-    # CL_8_60_x (10 instances)
-    "CL_8_60_1", "CL_8_60_2", "CL_8_60_3", "CL_8_60_4", "CL_8_60_5",
-    "CL_8_60_6", "CL_8_60_7", "CL_8_60_8", "CL_8_60_9", "CL_8_60_10",
-    
-    # CL_8_80_x (10 instances)
-    "CL_8_80_1", "CL_8_80_2", "CL_8_80_3", "CL_8_80_4", "CL_8_80_5",
-    "CL_8_80_6", "CL_8_80_7", "CL_8_80_8", "CL_8_80_9", "CL_8_80_10",
-    
-    # CL_8_100_x (10 instances)
-    "CL_8_100_1", "CL_8_100_2", "CL_8_100_3", "CL_8_100_4", "CL_8_100_5",
-    "CL_8_100_6", "CL_8_100_7", "CL_8_100_8", "CL_8_100_9", "CL_8_100_10",
-    
-    # CL_9_20_x (10 instances)
-    "CL_9_20_1", "CL_9_20_2", "CL_9_20_3", "CL_9_20_4", "CL_9_20_5",
-    "CL_9_20_6", "CL_9_20_7", "CL_9_20_8", "CL_9_20_9", "CL_9_20_10",
-    
-    # CL_9_40_x (10 instances)
-    "CL_9_40_1", "CL_9_40_2", "CL_9_40_3", "CL_9_40_4", "CL_9_40_5",
-    "CL_9_40_6", "CL_9_40_7", "CL_9_40_8", "CL_9_40_9", "CL_9_40_10",
-    
-    # CL_9_60_x (10 instances)
-    "CL_9_60_1", "CL_9_60_2", "CL_9_60_3", "CL_9_60_4", "CL_9_60_5",
-    "CL_9_60_6", "CL_9_60_7", "CL_9_60_8", "CL_9_60_9", "CL_9_60_10",
-    
-    # CL_9_80_x (10 instances)
-    "CL_9_80_1", "CL_9_80_2", "CL_9_80_3", "CL_9_80_4", "CL_9_80_5",
-    "CL_9_80_6", "CL_9_80_7", "CL_9_80_8", "CL_9_80_9", "CL_9_80_10",
-    
-    # CL_9_100_x (10 instances)
-    "CL_9_100_1", "CL_9_100_2", "CL_9_100_3", "CL_9_100_4", "CL_9_100_5",
-    "CL_9_100_6", "CL_9_100_7", "CL_9_100_8", "CL_9_100_9", "CL_9_100_10",
-    
-    # CL_10_20_x (10 instances)
-    "CL_10_20_1", "CL_10_20_2", "CL_10_20_3", "CL_10_20_4", "CL_10_20_5",
-    "CL_10_20_6", "CL_10_20_7", "CL_10_20_8", "CL_10_20_9", "CL_10_20_10",
-    
-    # CL_10_40_x (10 instances)
-    "CL_10_40_1", "CL_10_40_2", "CL_10_40_3", "CL_10_40_4", "CL_10_40_5",
-    "CL_10_40_6", "CL_10_40_7", "CL_10_40_8", "CL_10_40_9", "CL_10_40_10",
-    
-    # CL_10_60_x (10 instances)
-    "CL_10_60_1", "CL_10_60_2", "CL_10_60_3", "CL_10_60_4", "CL_10_60_5",
-    "CL_10_60_6", "CL_10_60_7", "CL_10_60_8", "CL_10_60_9", "CL_10_60_10",
-    
-    # CL_10_80_x (10 instances)
-    "CL_10_80_1", "CL_10_80_2", "CL_10_80_3", "CL_10_80_4", "CL_10_80_5",
-    "CL_10_80_6", "CL_10_80_7", "CL_10_80_8", "CL_10_80_9", "CL_10_80_10",
-    
-    # CL_10_100_x (10 instances)
-    "CL_10_100_1", "CL_10_100_2", "CL_10_100_3", "CL_10_100_4", "CL_10_100_5",
-    "CL_10_100_6", "CL_10_100_7", "CL_10_100_8", "CL_10_100_9", "CL_10_100_10"
-]
+                completed_instances = []
         else:
             existing_df = pd.DataFrame()
             completed_instances = []
-        # Set timeout
-        TIMEOUT = 900  # 30 minutes
         
-        # Start from instance 1 (skip index 0 which is empty)
+        # Timeout for each instance
+        TIMEOUT = 900  # 15 minutes
+        # Process each instance
         for instance_id in range(1, len(instances)):
             instance_name = instances[instance_id]
             
@@ -913,12 +722,12 @@ if __name__ == "__main__":
             print(f"{'=' * 50}")
             
             # Clean up previous result files
-            for temp_file in [f'results_{instance_id}.json', f'checkpoint_{instance_id}.json']:
+            for temp_file in [f'results_CPLEX_MIP_R_SB_{instance_id}.json', f'checkpoint_CPLEX_MIP_R_SB_{instance_id}.json']:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
             
             # Run instance with runlim
-            command = f"./runlim -t {TIMEOUT} python3 CPLEX_MIP_R_SB.py {instance_id}"
+            command = f"./runlim -r {TIMEOUT} python3 CPLEX_MIP_R_SB.py {instance_id}"
             
             try:
                 process = subprocess.Popen(command, shell=True)
@@ -928,11 +737,11 @@ if __name__ == "__main__":
                 # Check results
                 result = None
                 
-                if os.path.exists(f'results_{instance_id}.json'):
-                    with open(f'results_{instance_id}.json', 'r') as f:
+                if os.path.exists(f'results_CPLEX_MIP_R_SB_{instance_id}.json'):
+                    with open(f'results_CPLEX_MIP_R_SB_{instance_id}.json', 'r') as f:
                         result = json.load(f)
-                elif os.path.exists(f'checkpoint_{instance_id}.json'):
-                    with open(f'checkpoint_{instance_id}.json', 'r') as f:
+                elif os.path.exists(f'checkpoint_CPLEX_MIP_R_SB_{instance_id}.json'):
+                    with open(f'checkpoint_CPLEX_MIP_R_SB_{instance_id}.json', 'r') as f:
                         result = json.load(f)
                     result['Status'] = 'TIMEOUT'
                     result['Instance'] = instance_name
@@ -970,7 +779,7 @@ if __name__ == "__main__":
                 print(f"Error running instance {instance_name}: {str(e)}")
             
             # Clean up temp files
-            for temp_file in [f'results_{instance_id}.json', f'checkpoint_{instance_id}.json']:
+            for temp_file in [f'results_CPLEX_MIP_R_SB_{instance_id}.json', f'checkpoint_CPLEX_MIP_R_SB_{instance_id}.json']:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
         
@@ -984,7 +793,7 @@ if __name__ == "__main__":
         start = timeit.default_timer()
         
         try:
-            print(f"\nProcessing instance {instance_name}")
+            print(f"Processing instance {instance_name}")
             
             # Reset global variables
             best_bins = float('inf')
@@ -1064,7 +873,7 @@ if __name__ == "__main__":
             print(f"Results saved to {excel_file}")
             
             # Save JSON result for controller
-            with open(f'results_{instance_id}.json', 'w') as f:
+            with open(f'results_CPLEX_MIP_R_SB_{instance_id}.json', 'w') as f:
                 json.dump(result, f)
             
             print(f"Instance {instance_name} completed - Runtime: {runtime:.2f}s, Bins: {n_bins}")
@@ -1103,5 +912,5 @@ if __name__ == "__main__":
             existing_df.to_excel(excel_file, index=False)
             print(f"Error results saved to {excel_file}")
             
-            with open(f'results_{instance_id}.json', 'w') as f:
+            with open(f'results_CPLEX_MIP_R_SB_{instance_id}.json', 'w') as f:
                 json.dump(result, f)

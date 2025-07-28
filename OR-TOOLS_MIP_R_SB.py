@@ -42,7 +42,7 @@ def handle_interrupt(signum, frame):
         'Allow_Rotation': 'Yes'
     }
     
-    with open(f'results_{instance_id}.json', 'w') as f:
+    with open(f'results_OR-TOOLS_MIP_R_SB_{instance_id}.json', 'w') as f:
         json.dump(result, f)
     
     sys.exit(0)
@@ -358,7 +358,7 @@ def save_checkpoint(instance_id, bins, status="IN_PROGRESS"):
         'Allow_Rotation': 'Yes'
     }
     
-    with open(f'checkpoint_{instance_id}.json', 'w') as f:
+    with open(f'checkpoint_OR-TOOLS_MIP_R_SB_{instance_id}.json', 'w') as f:
         json.dump(checkpoint, f)
 
 def display_solution(W, H, rectangles, positions, assignments, rotations, instance_name):
@@ -648,7 +648,7 @@ def solve_bin_packing(W, H, rectangles, lower_bound, upper_bound, time_limit=900
             save_checkpoint(instance_id, best_bins)
         
         result = {
-            'status': 'OPTIMAL' if status == pywraplp.Solver.OPTIMAL else 'FEASIBLE',
+            'status': 'COMPLETE' if status == pywraplp.Solver.OPTIMAL else 'FEASIBLE',
             'n_bins': bins_used,
             'assignments': assignments,
             'positions': positions,
@@ -905,7 +905,7 @@ if __name__ == "__main__":
             print(f"{'=' * 50}")
             
             # Clean up previous result files
-            for temp_file in [f'results_{instance_id}.json', f'checkpoint_{instance_id}.json']:
+            for temp_file in [f'results_OR-TOOLS_MIP_R_SB_{instance_id}.json', f'checkpoint_OR-TOOLS_MIP_R_SB_{instance_id}.json']:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
             
@@ -920,11 +920,11 @@ if __name__ == "__main__":
                 # Check results
                 result = None
                 
-                if os.path.exists(f'results_{instance_id}.json'):
-                    with open(f'results_{instance_id}.json', 'r') as f:
+                if os.path.exists(f'results_OR-TOOLS_MIP_R_SB_{instance_id}.json'):
+                    with open(f'results_OR-TOOLS_MIP_R_SB_{instance_id}.json', 'r') as f:
                         result = json.load(f)
-                elif os.path.exists(f'checkpoint_{instance_id}.json'):
-                    with open(f'checkpoint_{instance_id}.json', 'r') as f:
+                elif os.path.exists(f'checkpoint_OR-TOOLS_MIP_R_SB_{instance_id}.json'):
+                    with open(f'checkpoint_OR-TOOLS_MIP_R_SB_{instance_id}.json', 'r') as f:
                         result = json.load(f)
                     result['Status'] = 'TIMEOUT'
                     result['Instance'] = instance_name
@@ -962,7 +962,7 @@ if __name__ == "__main__":
                 print(f"Error running instance {instance_name}: {str(e)}")
             
             # Clean up temp files
-            for temp_file in [f'results_{instance_id}.json', f'checkpoint_{instance_id}.json']:
+            for temp_file in [f'results_OR-TOOLS_MIP_R_SB_{instance_id}.json', f'checkpoint_OR-TOOLS_MIP_R_SB_{instance_id}.json']:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
         
@@ -1011,7 +1011,7 @@ if __name__ == "__main__":
             # Process result
             if solution:
                 n_bins = solution['n_bins']
-                status = 'OPTIMAL' if solution['status'] == 'OPTIMAL' else 'FEASIBLE'
+                status = 'COMPLETE' if solution['status'] == 'COMPLETE' else 'FEASIBLE'
                 
                 # Display solution
                 display_solution(W, H, rectangles, solution['positions'], solution['assignments'], 
@@ -1055,7 +1055,7 @@ if __name__ == "__main__":
             print(f"Results saved to {excel_file}")
             
             # Save JSON result for controller
-            with open(f'results_{instance_id}.json', 'w') as f:
+            with open(f'results_OR-TOOLS_MIP_R_SB_{instance_id}.json', 'w') as f:
                 json.dump(result, f)
             
             print(f"Instance {instance_name} completed - Runtime: {runtime:.2f}s, Bins: {n_bins}")
@@ -1095,5 +1095,5 @@ if __name__ == "__main__":
             existing_df.to_excel(excel_file, index=False)
             print(f"Error results saved to {excel_file}")
             
-            with open(f'results_{instance_id}.json', 'w') as f:
+            with open(f'results_OR-TOOLS_MIP_R_SB_{instance_id}.json', 'w') as f:
                 json.dump(result, f)
